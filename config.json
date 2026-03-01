@@ -1,23 +1,24 @@
 {
-    "project_name": "Poly2Vec",
+    "project_name": "Poly2Moment",
     "dataset_name": "NewYork",
-    "dataset": "", // Dataset name
-    "dataset_type1": "",   // Type of the first dataset ("polygons", "pollines", "points")
-    "dataset_type2": "",   // Type of the second dataset ("polygons", "pollines", "points")
-    "task": "", // Task name
-    "num_classes": "", // Number of classes
-    "data_path": "", // Path to the dataset
-    "data_file": "", // Name of the data file
+    "dataset": "NewYork_polygons_polygons_multi_relation",
+    "dataset_type1": "polygons",
+    "dataset_type2": "polygons",
+    "task": "multi-relation",
+    "num_classes": 6,
+    "data_path": "./data/NewYork",
+    "data_file": "/polygon_polygon_topological_relationship_data.pt",
     "save_dir": "./results/",
     "training": true,
 
-    "encoder_type": "poly2vec",
+    "encoder_type": "poly2moment",
+    "fusion": "learned_fusion",
 
     "batch_size": 128,
     "lr": 1e-4,
     "wd": 1e-8,
     "dropout": 0.2,
-    "d_input": 210,
+    "d_input": 121,
     "d_hid": 100,
     "d_out": 32,
 
