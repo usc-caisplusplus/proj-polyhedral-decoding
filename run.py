@@ -25,8 +25,8 @@ def parse_args():
     parser.add_argument("-data_file")
     parser.add_argument("-encoder_type")
     parser.add_argument("-data_path")
-    parser.add_argument("-num_classes", type=int, default=2)
-    parser.add_argument("-sampling_strategy", type=str, default="gfm")
+    parser.add_argument("-num_classes", type=int, default=None)
+    parser.add_argument("-sampling_strategy", type=str, default=None)
     args = parser.parse_args()
 
     params = {}
