@@ -13,7 +13,7 @@
 
     "encoder_type": "poly2moment",
     "fusion": "learned_fusion",
-    "sampling_strategy": "monomial",
+    "sampling_strategy": "fourier",
 
     "batch_size": 128,
     "lr": 1e-4,
@@ -30,7 +30,7 @@
     },
 
     "moment_params": {
-        "basis_type": "monomial",
+        "basis_type": "fourier",
         "max_order": 10
     },
 
