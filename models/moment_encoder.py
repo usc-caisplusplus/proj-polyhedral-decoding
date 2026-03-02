@@ -59,6 +59,10 @@ class GeometryMomentEncoder():
 
         return M, N
 
+    @property
+    def _moment_dtype(self):
+        return torch.complex64 if self.basis_type == 'fourier' else torch.float32
+
     def encode(self, geom_dataset: torch.Tensor, lengths: torch.Tensor, dataset_type: str):
         geom_dataset = geom_dataset.to(self.device)
 
@@ -80,7 +84,7 @@ class GeometryMomentEncoder():
     def point_encoder(self, points: torch.Tensor):
         n_geoms = points.shape[0]
         moment_shape = self.M.shape
-        moments = torch.zeros((n_geoms, *moment_shape), dtype=torch.float32, device=self.device)
+        moments = torch.zeros((n_geoms, *moment_shape), dtype=self._moment_dtype, device=self.device)
 
         points_np = points.cpu().numpy()
 
@@ -109,7 +113,7 @@ class GeometryMomentEncoder():
         """
         n_geoms = lines.shape[0]
         moment_shape = self.M.shape
-        moments = torch.zeros((n_geoms, *moment_shape), dtype=torch.float32, device=self.device)
+        moments = torch.zeros((n_geoms, *moment_shape), dtype=self._moment_dtype, device=self.device)
 
         lines_np = lines.cpu().numpy()
 
@@ -139,7 +143,7 @@ class GeometryMomentEncoder():
         """
         n_geoms = polylines.shape[0]
         moment_shape = self.M.shape
-        moments = torch.zeros((n_geoms, *moment_shape), dtype=torch.float32, device=self.device)
+        moments = torch.zeros((n_geoms, *moment_shape), dtype=self._moment_dtype, device=self.device)
 
         polylines_np = polylines.cpu().numpy()
         lengths_np = lengths.cpu().numpy()
@@ -178,7 +182,7 @@ class GeometryMomentEncoder():
         """
         n_geoms = polygons.shape[0]
         moment_shape = self.M.shape
-        moments = torch.zeros((n_geoms, *moment_shape), dtype=torch.float32, device=self.device)
+        moments = torch.zeros((n_geoms, *moment_shape), dtype=self._moment_dtype, device=self.device)
 
         polygons_np = polygons.cpu().numpy()
         lengths_np = lengths.cpu().numpy()
