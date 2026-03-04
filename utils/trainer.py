@@ -41,7 +41,7 @@ class Trainer:
             print(f"Epoch {e} costs {time.time() - time_start} s.")
             eloss, metrics = self.eval()
             # verbose
-            if verbose and e % 2 == 0:
+            if verbose:
                 print({
                     "epoch": e,
                     "train_loss": tloss,

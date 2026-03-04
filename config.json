@@ -1,13 +1,13 @@
 {
     "project_name": "Poly2Moment",
     "dataset_name": "NewYork",
-    "dataset": "NewYork_polygons_polygons_multi_relation",
-    "dataset_type1": "polygons",
-    "dataset_type2": "polygons",
-    "task": "multi-relation",
-    "num_classes": 6,
+    "dataset": "NewYork_points_points_distance",
+    "dataset_type1": "points",
+    "dataset_type2": "points",
+    "task": "distance-prediction",
+    "num_classes": 1,
     "data_path": "./data/NewYork",
-    "data_file": "/polygon_polygon_topological_relationship_data.pt",
+    "data_file": "/point_point_dis_data.pt",
     "save_dir": "./results/",
     "training": true,
 
@@ -19,7 +19,7 @@
     "lr": 1e-4,
     "wd": 1e-8,
     "dropout": 0.2,
-    "d_input": 121,
+    "d_input": 225,
     "d_hid": 100,
     "d_out": 32,
 
@@ -31,12 +31,12 @@
 
     "moment_params": {
         "basis_type": "fourier",
-        "max_order": 10
+        "max_order": 14
     },
 
     "device": "cuda",
 
-    "epochs": 20,
+    "epochs": 50,
 
     "patience": 10
 }
