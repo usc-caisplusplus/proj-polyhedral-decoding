@@ -99,7 +99,7 @@ class Trainer:
         y_true, y_prob, y_pred, y_logit = [], [], [], []
         y_true_multi = []
         with torch.no_grad():
-            for batch in self.val_loader:
+            for batch in tqdm(self.val_loader, desc="Validating"):
                 # get batch
                 x1 = batch[0].to(self.device)
                 x2 = batch[1].to(self.device)
@@ -130,8 +130,8 @@ class Trainer:
             # self.best_threshold = thresh_max_f1(y_true=y_true, y_prob=y_prob)
             accuracy = accuracy_score(y_true, y_pred)
             f1 = f1_score(y_true, y_pred, average='binary')
-            precision = precision_score(y_true, y_pred, average='binary')
-            recall = recall_score(y_true, y_pred, average='binary')
+            precision = precision_score(y_true, y_pred, average='binary', zero_division=0)
+            recall = recall_score(y_true, y_pred, average='binary', zero_division=0)
             aucroc = roc_auc_score(y_true=y_true, y_score=y_prob)
             auprc = average_precision_score(y_true=y_true, y_score=y_prob)
             cm = confusion_matrix(y_true, y_pred)
@@ -143,8 +143,8 @@ class Trainer:
             aucroc = roc_auc_score(y_true=y_true_multi, y_score=y_prob, multi_class='ovr', average='macro')
             auprc = average_precision_score(y_true=y_true_multi, y_score=y_prob, average='macro')
             f1 = f1_score(y_true, y_pred, average='macro')
-            precision = precision_score(y_true, y_pred, average='macro')
-            recall = recall_score(y_true, y_pred, average='macro')
+            precision = precision_score(y_true, y_pred, average='macro', zero_division=0)
+            recall = recall_score(y_true, y_pred, average='macro', zero_division=0)
             cm = confusion_matrix(y_true, y_pred)
             metrics = {'accuracy': accuracy, 'aucroc': aucroc, 'auprc': auprc, 'f1': f1, 'precision': precision, 'recall': recall, 'confusion_matrix': cm}
         else:
@@ -181,6 +181,7 @@ class Trainer:
                 # compute metrics
                 if self.args.task == "multi-relation" or self.args.task == "direction-prediction":
                     y_pred.extend(torch.argmax(logits, dim=1).cpu().numpy().astype(int))
+                    y_prob.extend(out_probs)
                 else:
                     y_logit.extend(logits.cpu().numpy())
                     y_prob.extend(out_probs)
@@ -189,8 +190,8 @@ class Trainer:
         if self.task_name == 'relation-prediction':
             accuracy = accuracy_score(y_true, y_pred)
             f1 = f1_score(y_true, y_pred, average='binary')
-            precision = precision_score(y_true, y_pred, average='binary')
-            recall = recall_score(y_true, y_pred, average='binary')
+            precision = precision_score(y_true, y_pred, average='binary', zero_division=0)
+            recall = recall_score(y_true, y_pred, average='binary', zero_division=0)
             aucroc = roc_auc_score(y_true=y_true, y_score=y_prob)
             auprc = average_precision_score(y_true=y_true, y_score=y_prob)
             cm = confusion_matrix(y_true, y_pred)
@@ -201,8 +202,8 @@ class Trainer:
             aucroc = roc_auc_score(y_true=y_true_multi, y_score=y_prob, multi_class='ovr', average='macro')
             auprc = average_precision_score(y_true=y_true_multi, y_score=y_prob, average='macro')
             f1 = f1_score(y_true, y_pred, average='macro')
-            precision = precision_score(y_true, y_pred, average='macro')
-            recall = recall_score(y_true, y_pred, average='macro')
+            precision = precision_score(y_true, y_pred, average='macro', zero_division=0)
+            recall = recall_score(y_true, y_pred, average='macro', zero_division=0)
             cm = confusion_matrix(y_true, y_pred)
             metrics = {'accuracy': accuracy, 'aucroc': aucroc, 'auprc': auprc, 'f1': f1, 'precision': precision, 'recall': recall, 'confusion_matrix': cm}
         else:

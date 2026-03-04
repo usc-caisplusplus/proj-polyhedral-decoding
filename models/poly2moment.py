@@ -95,16 +95,15 @@ class Poly2Moment(nn.Module):
 
         # Flatten the moment tensor
         # x_encoded has shape (B, n_m, n_n), flatten to (B, n_m * n_n)
-        x_flat = x_encoded.reshape(B, -1)
+        if torch.is_complex(x_encoded):
+            x_flat_real = x_encoded.real.reshape(B, -1)
+            x_flat_imag = x_encoded.imag.reshape(B, -1)
+        else:
+            x_flat_real = x_encoded.reshape(B, -1)
+            x_flat_imag = x_encoded.reshape(B, -1)
 
-        # For real-valued moments, we create two streams:
-        # Stream 1: Focus on lower-order moments (coarse features)
-        # Stream 2: Focus on higher-order moments (fine details)
-        # Alternatively, we can use positive and negative parts
-
-        # Simple approach: Apply learned transformations to create two streams
-        x_stream1 = self.param_stream1(x_flat)
-        x_stream2 = self.param_stream2(x_flat)
+        x_stream1 = self.param_stream1(x_flat_real)
+        x_stream2 = self.param_stream2(x_flat_imag)
 
         # Concatenate the two streams
         x_concat = torch.cat([x_stream1, x_stream2], dim=1)
