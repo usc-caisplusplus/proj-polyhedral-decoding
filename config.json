@@ -1,19 +1,19 @@
 {
     "project_name": "Poly2Moment",
     "dataset_name": "NewYork",
-    "dataset": "NewYork_points_points_distance",
+    "dataset": "NewYork_points_polylines_distance",
     "dataset_type1": "points",
-    "dataset_type2": "points",
+    "dataset_type2": "polylines",
     "task": "distance-prediction",
     "num_classes": 1,
     "data_path": "./data/NewYork",
-    "data_file": "/point_point_dis_data.pt",
+    "data_file": "/point_polyline_dis_data.pt",
     "save_dir": "./results/",
     "training": true,
 
     "encoder_type": "poly2moment",
     "fusion": "learned_fusion",
-    "sampling_strategy": "fourier",
+    "sampling_strategy": "legendre",
 
     "batch_size": 128,
     "lr": 1e-4,
@@ -30,7 +30,7 @@
     },
 
     "moment_params": {
-        "basis_type": "fourier",
+        "basis_type": "legendre",
         "max_order": 14
     },
 
