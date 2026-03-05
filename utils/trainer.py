@@ -116,14 +116,18 @@ class Trainer:
                     if y.dim() > 1:
                         y = y.argmax(dim=1)
                     y_true_multi.extend(label_binarize(y.cpu().numpy(), classes=[i for i in range(self.args.num_classes)]))
-                y_true.extend(y.cpu().numpy())
+                y_np = y.cpu().numpy()
+                if y_np.ndim > 1:
+                    y_np = y_np.argmax(axis=1)
+                y_true.extend(y_np)
                 loss = self.criterion(logits, y)
                 val_loss.append(loss.item())
 
                 # compute metrics
                 if self.args.task == "multi-relation" or self.args.task == "direction-prediction":
+                    probs = torch.softmax(logits, dim=1).cpu().numpy()
                     y_pred.extend(torch.argmax(logits, dim=1).cpu().numpy().astype(int))
-                    y_prob.extend(logits.cpu().numpy())
+                    y_prob.extend(probs)
                 else:
                     out_probs = logits.cpu().numpy()
                     y_logit.extend(logits.cpu().numpy())
@@ -144,8 +148,14 @@ class Trainer:
                        'precision': precision, 'recall': recall, 'confusion_matrix': cm}
         elif self.task_name == "multi-relation" or self.task_name == "direction-prediction":
             accuracy = accuracy_score(y_true, y_pred)
-            aucroc = roc_auc_score(y_true=y_true_multi, y_score=y_prob, multi_class='ovr', average='macro')
-            auprc = average_precision_score(y_true=y_true_multi, y_score=y_prob, average='macro')
+            y_prob_arr = np.array(y_prob)
+            y_true_multi_arr = np.array(y_true_multi)
+            if self.args.num_classes == 2:
+                aucroc = roc_auc_score(y_true=y_true, y_score=y_prob_arr[:, 1])
+                auprc = average_precision_score(y_true=y_true, y_score=y_prob_arr[:, 1])
+            else:
+                aucroc = roc_auc_score(y_true=y_true_multi_arr, y_score=y_prob_arr, multi_class='ovr', average='macro')
+                auprc = average_precision_score(y_true=y_true_multi_arr, y_score=y_prob_arr, average='macro')
             f1 = f1_score(y_true, y_pred, average='macro')
             precision = precision_score(y_true, y_pred, average='macro', zero_division=0)
             recall = recall_score(y_true, y_pred, average='macro', zero_division=0)
@@ -182,12 +192,16 @@ class Trainer:
                     if y.dim() > 1:
                         y = y.argmax(dim=1)
                     y_true_multi.extend(label_binarize(y.cpu().numpy(), classes=[i for i in range(self.args.num_classes)]))
-                y_true.extend(y.cpu().numpy())
-                out_probs = logits.cpu().numpy()
+                y_np = y.cpu().numpy()
+                if y_np.ndim > 1:
+                    y_np = y_np.argmax(axis=1)
+                y_true.extend(y_np)
                 # compute metrics
                 if self.args.task == "multi-relation" or self.args.task == "direction-prediction":
+                    probs = torch.softmax(logits, dim=1).cpu().numpy()
                     y_pred.extend(torch.argmax(logits, dim=1).cpu().numpy().astype(int))
-                    y_prob.extend(out_probs)
+                    y_prob.extend(probs)
+                out_probs = probs if (self.args.task == "multi-relation" or self.args.task == "direction-prediction") else logits.cpu().numpy()
                 else:
                     y_logit.extend(logits.cpu().numpy())
                     y_prob.extend(out_probs)
@@ -205,8 +219,14 @@ class Trainer:
                        'auprc': auprc, 'precision': precision, 'recall': recall, 'confusion_matrix': cm}
         elif self.task_name == "multi-relation" or self.task_name == "direction-prediction":
             accuracy = accuracy_score(y_true, y_pred)
-            aucroc = roc_auc_score(y_true=y_true_multi, y_score=y_prob, multi_class='ovr', average='macro')
-            auprc = average_precision_score(y_true=y_true_multi, y_score=y_prob, average='macro')
+            y_prob_arr = np.array(y_prob)
+            y_true_multi_arr = np.array(y_true_multi)
+            if self.args.num_classes == 2:
+                aucroc = roc_auc_score(y_true=y_true, y_score=y_prob_arr[:, 1])
+                auprc = average_precision_score(y_true=y_true, y_score=y_prob_arr[:, 1])
+            else:
+                aucroc = roc_auc_score(y_true=y_true_multi_arr, y_score=y_prob_arr, multi_class='ovr', average='macro')
+                auprc = average_precision_score(y_true=y_true_multi_arr, y_score=y_prob_arr, average='macro')
             f1 = f1_score(y_true, y_pred, average='macro')
             precision = precision_score(y_true, y_pred, average='macro', zero_division=0)
             recall = recall_score(y_true, y_pred, average='macro', zero_division=0)
