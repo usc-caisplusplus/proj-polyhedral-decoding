@@ -83,6 +83,8 @@ class Trainer:
 
             if self.args.task == "multi-relation" or self.args.task == "direction-prediction":
                 y = y.type(torch.LongTensor).to(self.device)
+                if y.dim() > 1:
+                    y = y.argmax(dim=1)
             loss = self.criterion(logits, y)
             # save the loss
             train_loss.append(loss.item())
@@ -106,13 +108,15 @@ class Trainer:
                 len1 = batch[2].to(self.device)
                 len2 = batch[3].to(self.device)
                 y = batch[4].to(self.device)
-                y_true.extend(y.cpu().numpy())
                 # forward pass
                 logits = self.model(x1, len1, self.args.dataset_type1, x2, len2, self.args.dataset_type2)
 
                 if self.args.task == "multi-relation" or self.args.task == "direction-prediction":
                     y = y.type(torch.LongTensor).to(self.device)
+                    if y.dim() > 1:
+                        y = y.argmax(dim=1)
                     y_true_multi.extend(label_binarize(y.cpu().numpy(), classes=[i for i in range(self.args.num_classes)]))
+                y_true.extend(y.cpu().numpy())
                 loss = self.criterion(logits, y)
                 val_loss.append(loss.item())
 
@@ -171,12 +175,14 @@ class Trainer:
                 len1 = batch[2].to(self.device)
                 len2 = batch[3].to(self.device)
                 y = batch[4].to(self.device)
-                y_true.extend(y.cpu().numpy())
                 logits = self.model(x1, len1, self.args.dataset_type1, x2, len2, self.args.dataset_type2)
 
                 if self.args.task == "multi-relation" or self.args.task == "direction-prediction":
                     y = y.type(torch.LongTensor).to(self.device)
+                    if y.dim() > 1:
+                        y = y.argmax(dim=1)
                     y_true_multi.extend(label_binarize(y.cpu().numpy(), classes=[i for i in range(self.args.num_classes)]))
+                y_true.extend(y.cpu().numpy())
                 out_probs = logits.cpu().numpy()
                 # compute metrics
                 if self.args.task == "multi-relation" or self.args.task == "direction-prediction":

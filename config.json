@@ -1,13 +1,13 @@
 {
     "project_name": "Poly2Moment",
     "dataset_name": "NewYork",
-    "dataset": "NewYork_points_polylines_distance",
-    "dataset_type1": "points",
-    "dataset_type2": "polylines",
-    "task": "distance-prediction",
-    "num_classes": 1,
+    "dataset": "NewYork_polygons_points_topological",
+    "dataset_type1": "polygons",
+    "dataset_type2": "points",
+    "task": "multi-relation",
+    "num_classes": 2,
     "data_path": "./data/NewYork",
-    "data_file": "/point_polyline_dis_data.pt",
+    "data_file": "/polygon_point_contain_data.pt",
     "save_dir": "./results/",
     "training": true,
 
@@ -36,7 +36,7 @@
 
     "device": "cuda",
 
-    "epochs": 50,
+    "epochs": 100,
 
     "patience": 10
 }
