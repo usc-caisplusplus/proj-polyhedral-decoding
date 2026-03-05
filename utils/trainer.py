@@ -201,9 +201,9 @@ class Trainer:
                     probs = torch.softmax(logits, dim=1).cpu().numpy()
                     y_pred.extend(torch.argmax(logits, dim=1).cpu().numpy().astype(int))
                     y_prob.extend(probs)
-                out_probs = probs if (self.args.task == "multi-relation" or self.args.task == "direction-prediction") else logits.cpu().numpy()
                 else:
-                    y_logit.extend(logits.cpu().numpy())
+                    out_probs = logits.cpu().numpy()
+                    y_logit.extend(out_probs)
                     y_prob.extend(out_probs)
                     y_pred.extend((out_probs > self.best_threshold).astype(int))
         # compute metrics
