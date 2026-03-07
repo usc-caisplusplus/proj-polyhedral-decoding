@@ -64,6 +64,9 @@ class Poly2Moment(nn.Module):
         # Final embedding MLP
         self.nn = SimpleMLP(d_input, args.d_hid, args.d_out, args.dropout)
 
+        # Layer norm to normalize per-sample moment features before stream processing
+        self.norm = nn.LayerNorm(args.d_input)
+
         # Learned fusion parameters for moment streams
         # For real-valued moments, we can split into positive and negative parts
         # or use even/odd order moments, or simply use two learned transformations
@@ -96,11 +99,11 @@ class Poly2Moment(nn.Module):
         # Flatten the moment tensor
         # x_encoded has shape (B, n_m, n_n), flatten to (B, n_m * n_n)
         if torch.is_complex(x_encoded):
-            x_flat_real = x_encoded.real.reshape(B, -1)
-            x_flat_imag = x_encoded.imag.reshape(B, -1)
+            x_flat_real = self.norm(x_encoded.real.reshape(B, -1))
+            x_flat_imag = self.norm(x_encoded.imag.reshape(B, -1))
         else:
-            x_flat_real = x_encoded.reshape(B, -1)
-            x_flat_imag = x_encoded.reshape(B, -1)
+            x_flat_real = self.norm(x_encoded.reshape(B, -1))
+            x_flat_imag = self.norm(x_encoded.reshape(B, -1))
 
         x_stream1 = self.param_stream1(x_flat_real)
         x_stream2 = self.param_stream2(x_flat_imag)
