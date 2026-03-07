@@ -31,7 +31,8 @@
 
     "moment_params": {
         "basis_type": "legendre",
-        "max_order": 14
+        "max_order": 14,
+        "moment_norm": "sign_log"
     },
 
     "device": "cuda",
