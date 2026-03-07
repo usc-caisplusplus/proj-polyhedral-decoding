@@ -133,8 +133,9 @@ class Poly2Moment(nn.Module):
                 x_flat_real = torch.log1p(torch.abs(x_flat))
                 x_flat_imag = torch.sign(x_flat)
             else:
-                x_flat_real = self._normalize(x_flat)
-                x_flat_imag = self._normalize(x_flat)
+                x_flat_norm = self._normalize(x_flat)
+                x_flat_real = x_flat_norm
+                x_flat_imag = x_flat_norm
 
         x_stream1 = self.param_stream1(x_flat_real)
         x_stream2 = self.param_stream2(x_flat_imag)
