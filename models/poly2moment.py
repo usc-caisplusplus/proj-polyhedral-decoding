@@ -99,8 +99,7 @@ class Poly2Moment(nn.Module):
             # LayerNorm for shape, but restore the raw (0,0) moment at position 0
             m00 = x[:, 0:1]
             normalized = self.norm(x)
-            normalized[:, 0:1] = m00
-            return normalized
+            return torch.cat([m00, normalized[:, 1:]], dim=1)
         else:
             raise ValueError(f"Unknown moment_norm: {self.moment_norm}")
 
