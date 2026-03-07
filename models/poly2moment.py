@@ -62,8 +62,8 @@ class Poly2Moment(nn.Module):
         # Final embedding MLP
         self.nn = SimpleMLP(d_input, args.d_hid, args.d_out, args.dropout)
 
-        # Layer norm (used only when moment_norm == "layer_norm")
-        if self.moment_norm == 'layer_norm':
+        # Layer norm (used when moment_norm is "layer_norm" or "layer_norm_m00")
+        if self.moment_norm in ('layer_norm', 'layer_norm_m00'):
             self.norm = nn.LayerNorm(args.d_input)
 
         # Learned fusion parameters for moment streams
@@ -80,10 +80,11 @@ class Poly2Moment(nn.Module):
         """
         Apply the configured normalization strategy to a flat moment vector.
         Strategies:
-            none       — pass through unchanged
-            layer_norm — per-sample zero-mean unit-variance (loses scale)
-            sign_log   — sign(x) * log1p(|x|), preserves scale, compresses dynamic range
-            m00_scale  — divide by the (0,0) moment (arc length / area), loses absolute scale
+            none           — pass through unchanged
+            layer_norm     — per-sample zero-mean unit-variance (loses scale)
+            sign_log       — sign(x) * log1p(|x|), preserves scale, compresses dynamic range
+            m00_scale      — divide by the (0,0) moment (arc length / area), loses absolute scale
+            layer_norm_m00 — layer_norm for shape + raw m00 restored at position 0
         """
         if self.moment_norm == 'none':
             return x
@@ -94,6 +95,12 @@ class Poly2Moment(nn.Module):
         elif self.moment_norm == 'm00_scale':
             m00 = x[:, 0:1].abs().clamp(min=1e-6)
             return x / m00
+        elif self.moment_norm == 'layer_norm_m00':
+            # LayerNorm for shape, but restore the raw (0,0) moment at position 0
+            m00 = x[:, 0:1]
+            normalized = self.norm(x)
+            normalized[:, 0:1] = m00
+            return normalized
         else:
             raise ValueError(f"Unknown moment_norm: {self.moment_norm}")
 

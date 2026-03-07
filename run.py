@@ -50,6 +50,8 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.device == "cuda" else "cpu")
     print("using device:", device)
+    if args.encoder_type == "poly2moment":
+        print("moment_params:", args.moment_params)
 
     args.save_dir = get_save_dir(f"{args.save_dir}/{run_name}", training=args.training)
 
