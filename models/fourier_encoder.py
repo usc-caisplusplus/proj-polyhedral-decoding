@@ -225,6 +225,6 @@ class GeometryFourierEncoder():
         part1 = torch.where(u_mask, part1_sp, part1)
         part2 = torch.where(u_mask, part2_sp, part2)
 
-        FT = torch.where(zero_mask, area, (1.0 / abs(det)) * part1 * part2 * phase_shift)
+        FT = torch.where(zero_mask, area.to(torch.complex64), (1.0 / abs(det)) * part1 * part2 * phase_shift)
 
         return FT

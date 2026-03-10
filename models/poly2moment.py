@@ -50,10 +50,8 @@ class Poly2Moment(nn.Module):
 
         # Get basis type for determining if moments are real or complex
         self.basis_type = args.moment_params.get('basis_type', 'monomial')
-
-        # For monomial and Legendre bases, moments are real-valued
-        # We still use a dual-stream architecture for consistency,
-        # but we can split the moment tensor differently
+        # Normalization strategy: "none" | "layer_norm" | "sign_log" | "m00_scale"
+        self.moment_norm = args.moment_params.get('moment_norm', 'none')
 
         # Input dimension setup
         if self.fusion == 'learned_fusion' or self.fusion == 'concat':
@@ -64,9 +62,11 @@ class Poly2Moment(nn.Module):
         # Final embedding MLP
         self.nn = SimpleMLP(d_input, args.d_hid, args.d_out, args.dropout)
 
+        # Layer norm (used when moment_norm is "layer_norm" or "layer_norm_m00")
+        if self.moment_norm in ('layer_norm', 'layer_norm_m00'):
+            self.norm = nn.LayerNorm(args.d_input)
+
         # Learned fusion parameters for moment streams
-        # For real-valued moments, we can split into positive and negative parts
-        # or use even/odd order moments, or simply use two learned transformations
         self.param_stream1 = nn.Sequential(
             nn.Linear(args.d_input, args.d_input, bias=False),
             MLP(args.d_input, dropout=args.dropout)
@@ -75,6 +75,33 @@ class Poly2Moment(nn.Module):
             nn.Linear(args.d_input, args.d_input, bias=False),
             MLP(args.d_input, dropout=args.dropout)
         )
+
+    def _normalize(self, x):
+        """
+        Apply the configured normalization strategy to a flat moment vector.
+        Strategies:
+            none           — pass through unchanged
+            layer_norm     — per-sample zero-mean unit-variance (loses scale)
+            sign_log       — sign(x) * log1p(|x|), preserves scale, compresses dynamic range
+            m00_scale      — divide by the (0,0) moment (arc length / area), loses absolute scale
+            layer_norm_m00 — layer_norm for shape + raw m00 restored at position 0
+        """
+        if self.moment_norm == 'none':
+            return x
+        elif self.moment_norm == 'layer_norm':
+            return self.norm(x)
+        elif self.moment_norm == 'sign_log':
+            return torch.sign(x) * torch.log1p(torch.abs(x))
+        elif self.moment_norm == 'm00_scale':
+            m00 = x[:, 0:1].abs().clamp(min=1e-6)
+            return x / m00
+        elif self.moment_norm == 'layer_norm_m00':
+            # LayerNorm for shape, but restore the raw (0,0) moment at position 0
+            m00 = x[:, 0:1]
+            normalized = self.norm(x)
+            return torch.cat([m00, normalized[:, 1:]], dim=1)
+        else:
+            raise ValueError(f"Unknown moment_norm: {self.moment_norm}")
 
     def forward(self, x, lengths, dataset_type):
         """
@@ -93,14 +120,22 @@ class Poly2Moment(nn.Module):
         # Encode geometry using moment basis
         x_encoded = self.moment_encoder.encode(x, lengths, dataset_type=dataset_type)
 
-        # Flatten the moment tensor
-        # x_encoded has shape (B, n_m, n_n), flatten to (B, n_m * n_n)
+        # Flatten the moment tensor: (B, O, O) -> (B, O*O)
         if torch.is_complex(x_encoded):
-            x_flat_real = x_encoded.real.reshape(B, -1)
-            x_flat_imag = x_encoded.imag.reshape(B, -1)
+            x_real = x_encoded.real.reshape(B, -1)
+            x_imag = x_encoded.imag.reshape(B, -1)
+            x_flat_real = self._normalize(x_real)
+            x_flat_imag = self._normalize(x_imag)
         else:
-            x_flat_real = x_encoded.reshape(B, -1)
-            x_flat_imag = x_encoded.reshape(B, -1)
+            x_flat = x_encoded.reshape(B, -1)
+            # sign_log: stream1=log-magnitude, stream2=sign (mirrors mag/phase split)
+            if self.moment_norm == 'sign_log':
+                x_flat_real = torch.log1p(torch.abs(x_flat))
+                x_flat_imag = torch.sign(x_flat)
+            else:
+                x_flat_norm = self._normalize(x_flat)
+                x_flat_real = x_flat_norm
+                x_flat_imag = x_flat_norm
 
         x_stream1 = self.param_stream1(x_flat_real)
         x_stream2 = self.param_stream2(x_flat_imag)
