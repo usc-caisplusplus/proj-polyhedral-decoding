@@ -456,40 +456,69 @@ def batch_moments_polygons_monomial(
     polygons: np.ndarray,    # (B, maxK, 2)  padded
     lengths:  np.ndarray,    # (B,)  int — actual vertex count
     tables:   MomentTables,
+    signs=None,  # (B, maxK) np.ndarray  +1 exterior, -1 hole, 0 sentinel/pad
 ) -> np.ndarray:             # (B, O, O) float64
     """
     Vectorized Green's-theorem monomial polygon moments for a batch.
+
+    When `signs` is provided (hole-aware mode), NaN sentinel rows are skipped
+    and each edge's contribution is multiplied by the sign of its start vertex
+    (+1 for exterior edges, -1 for hole edges), implementing:
+        M_polygon_with_hole = M_exterior - M_hole
     """
     B = polygons.shape[0]
     O = tables.O
 
-    edge_ax, edge_ay, edge_dx, edge_dy = [], [], [], []
+    edge_ax, edge_ay, edge_dx, edge_dy, edge_signs = [], [], [], [], []
     edge_geom_idx = []
     lengths_np = np.asarray(lengths, dtype=int)
+    hole_aware = signs is not None
 
     for b in range(B):
         K = int(lengths_np[b])
         if K < 3:
             continue
-        V = polygons[b, :K]                    # (K, 2)
-        V_next = np.roll(V, -1, axis=0)        # (K, 2)
-        edge_ax.append(V[:, 0])
-        edge_ay.append(V[:, 1])
-        edge_dx.append(V_next[:, 0] - V[:, 0])
-        edge_dy.append(V_next[:, 1] - V[:, 1])
-        edge_geom_idx.extend([b] * K)
+        V = polygons[b, :K]           # (K, 2)
+        S = signs[b, :K] if hole_aware else np.ones(K)  # (K,)
+
+        # Build edges, skipping any vertex that is a NaN sentinel or whose
+        # sign is 0 (sentinel), and also skipping edges that would cross a
+        # ring boundary (i.e. where the next vertex is a sentinel).
+        for k in range(K):
+            if hole_aware and S[k] == 0.0:
+                continue  # skip the NaN sentinel vertex itself
+            k_next = (k + 1) % K
+            # Skip edge if next vertex is a sentinel or a different ring
+            if hole_aware and S[k_next] == 0.0:
+                continue
+            # Skip closing edge that would jump from one ring to another
+            if hole_aware and S[k] != S[k_next] and k_next != 0:
+                continue
+            ax_val, ay_val = V[k, 0], V[k, 1]
+            bx_val, by_val = V[k_next, 0], V[k_next, 1]
+            if np.isnan(ax_val) or np.isnan(bx_val):
+                continue
+            edge_ax.append(ax_val)
+            edge_ay.append(ay_val)
+            edge_dx.append(bx_val - ax_val)
+            edge_dy.append(by_val - ay_val)
+            edge_signs.append(S[k])
+            edge_geom_idx.append(b)
 
     out = np.zeros((B, O, O), dtype=np.float64)
     if not edge_ax:
         return out
 
-    ax  = np.concatenate(edge_ax)
-    ay  = np.concatenate(edge_ay)
-    dx  = np.concatenate(edge_dx)
-    dy  = np.concatenate(edge_dy)
+    ax  = np.array(edge_ax)
+    ay  = np.array(edge_ay)
+    dx  = np.array(edge_dx)
+    dy  = np.array(edge_dy)
+    sg  = np.array(edge_signs)        # (E,)
     idx = np.array(edge_geom_idx, dtype=int)
 
     edge_moments = _batch_monomial_polygon_moments_edges(ax, ay, dx, dy, tables)
+    # Apply per-edge sign: hole edges contribute negatively
+    edge_moments *= sg[:, None, None]
     np.add.at(out, idx, edge_moments)
 
     return out
@@ -500,6 +529,7 @@ def batch_moments_polygons_fourier(
     lengths:  np.ndarray,    # (B,)  int
     tables:   MomentTables,
     eps: float = 1e-14,
+    signs=None,  # (B, maxK) np.ndarray  +1 exterior, -1 hole, 0 sentinel/pad
 ) -> np.ndarray:             # (B, O, O) complex128
     """
     Vectorized Green's-theorem Fourier polygon moments for a batch.
@@ -507,36 +537,56 @@ def batch_moments_polygons_fourier(
     For m != 0:  contrib = inv_m * dy[e] * edge_int[e, m, n]
     For m == 0, n != 0:  contrib = inv_n * (-dx[e]) * edge_int[e, 0, n]
     For m == n == 0:  contrib = shoelace area
+
+    When `signs` is provided, hole edges are multiplied by -1 so their
+    contribution is subtracted, implementing Green's theorem for polygons
+    with holes.
     """
     B = polygons.shape[0]
     O = tables.O
     M = tables.M_grid   # (O, O)
     N = tables.N_grid   # (O, O)
 
-    edge_ax, edge_ay, edge_dx, edge_dy = [], [], [], []
+    edge_ax, edge_ay, edge_dx, edge_dy, edge_signs = [], [], [], [], []
     edge_geom_idx = []
     lengths_np = np.asarray(lengths, dtype=int)
+    hole_aware = signs is not None
 
     for b in range(B):
         K = int(lengths_np[b])
         if K < 3:
             continue
         V = polygons[b, :K]
-        V_next = np.roll(V, -1, axis=0)
-        edge_ax.append(V[:, 0])
-        edge_ay.append(V[:, 1])
-        edge_dx.append(V_next[:, 0] - V[:, 0])
-        edge_dy.append(V_next[:, 1] - V[:, 1])
-        edge_geom_idx.extend([b] * K)
+        S = signs[b, :K] if hole_aware else np.ones(K)
+
+        for k in range(K):
+            if hole_aware and S[k] == 0.0:
+                continue
+            k_next = (k + 1) % K
+            if hole_aware and S[k_next] == 0.0:
+                continue
+            if hole_aware and S[k] != S[k_next] and k_next != 0:
+                continue
+            ax_val, ay_val = V[k, 0], V[k, 1]
+            bx_val, by_val = V[k_next, 0], V[k_next, 1]
+            if np.isnan(ax_val) or np.isnan(bx_val):
+                continue
+            edge_ax.append(ax_val)
+            edge_ay.append(ay_val)
+            edge_dx.append(bx_val - ax_val)
+            edge_dy.append(by_val - ay_val)
+            edge_signs.append(S[k])
+            edge_geom_idx.append(b)
 
     out = np.zeros((B, O, O), dtype=np.complex128)
     if not edge_ax:
         return out
 
-    ax  = np.concatenate(edge_ax)
-    ay  = np.concatenate(edge_ay)
-    dx  = np.concatenate(edge_dx)
-    dy  = np.concatenate(edge_dy)
+    ax  = np.array(edge_ax)
+    ay  = np.array(edge_ay)
+    dx  = np.array(edge_dx)
+    dy  = np.array(edge_dy)
+    sg  = np.array(edge_signs)
     idx = np.array(edge_geom_idx, dtype=int)
     E   = ax.shape[0]
 
@@ -582,6 +632,9 @@ def batch_moments_polygons_fourier(
     shoelace = 0.5 * (ax * dy - ay * dx)   # (E,)  signed area contribution
     contrib[:, mask_00] += shoelace[:, None]
 
+    # Apply per-edge sign: hole edges contribute negatively
+    contrib *= sg[:, None, None]
+
     np.add.at(out, idx, contrib)
 
     return out
@@ -591,6 +644,7 @@ def batch_moments_polygons_legendre(
     polygons: np.ndarray,    # (B, maxK, 2)  padded
     lengths:  np.ndarray,    # (B,)  int
     tables:   MomentTables,
+    signs=None,  # (B, maxK) np.ndarray  +1 exterior, -1 hole, 0 sentinel/pad
 ) -> np.ndarray:             # (B, O, O) float64
     """
     C_leg[b, m, n] = sum_{u,v} A[m,u] * A[n,v] * C_mono[b, u, v]
@@ -598,7 +652,7 @@ def batch_moments_polygons_legendre(
     Computes all monomial polygon moments first, then applies the Legendre
     expansion as a double matrix multiply — no per-(m,n) Python loop.
     """
-    C_mono = batch_moments_polygons_monomial(polygons, lengths, tables)   # (B, O, O)
+    C_mono = batch_moments_polygons_monomial(polygons, lengths, tables, signs=signs)   # (B, O, O)
     A = tables.leg_coef   # (O, O)
 
     tmp   = np.einsum('mu,buv->bmv', A, C_mono)   # (B, O, O)
@@ -617,6 +671,7 @@ def batch_encode(
     dataset_type: str,      # "points" | "polylines" | "polygons"
     tables: MomentTables,
     basis: str = 'legendre',
+    signs=None,             # (B, maxK) np.ndarray for hole-aware polygon encoding
 ) -> np.ndarray:            # (B, O, O)
     """
     Single entry point that dispatches to the correct vectorized encoder.
@@ -636,11 +691,11 @@ def batch_encode(
 
     elif dataset_type == 'polygons':
         if basis == 'monomial':
-            return batch_moments_polygons_monomial(geom, lengths, tables)
+            return batch_moments_polygons_monomial(geom, lengths, tables, signs=signs)
         elif basis == 'fourier':
-            return batch_moments_polygons_fourier(geom, lengths, tables)
+            return batch_moments_polygons_fourier(geom, lengths, tables, signs=signs)
         elif basis == 'legendre':
-            return batch_moments_polygons_legendre(geom, lengths, tables)
+            return batch_moments_polygons_legendre(geom, lengths, tables, signs=signs)
         else:
             raise ValueError(f"Unknown basis: {basis}")
 
