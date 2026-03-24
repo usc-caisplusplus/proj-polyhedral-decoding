@@ -1,9 +1,9 @@
 {
     "project_name": "Poly2Moment",
     "dataset_name": "NewYork",
-    "dataset": "NewYork_polygons_points_topological",
-    "dataset_type1": "polygons",
-    "dataset_type2": "points",
+    "dataset": "NewYork_polylines_polylines_topological",
+    "dataset_type1": "polylines",
+    "dataset_type2": "polylines",
     "task": "multi-relation",
     "num_classes": 2,
     "data_path": "./data/NewYork",
