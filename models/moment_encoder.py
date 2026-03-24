@@ -46,6 +46,9 @@ class GeometryMomentEncoder():
         return torch.tensor(result, dtype=self._moment_dtype, device=self.device)
 
     def _encode_points(self, points_np: np.ndarray) -> np.ndarray:
+        # points may arrive as (B, 1, 2) from the padded dataloader — squeeze to (B, 2)
+        if points_np.ndim == 3:
+            points_np = points_np[:, 0, :]
         if self.basis_type == 'monomial':
             return batch_moments_points_monomial(points_np, self.tables)
         elif self.basis_type == 'fourier':
