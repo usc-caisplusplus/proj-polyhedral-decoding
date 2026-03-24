@@ -27,6 +27,8 @@ def parse_args():
     parser.add_argument("-data_path")
     parser.add_argument("-num_classes", type=int, default=None)
     parser.add_argument("-sampling_strategy", type=str, default=None)
+    parser.add_argument("-epochs", type=int, default=None)
+    parser.add_argument("-patience", type=int, default=None)
     args = parser.parse_args()
 
     params = {}
@@ -116,3 +118,9 @@ if __name__ == "__main__":
     test_metrics = trainer.test(test_loader, best_model)
 
     print(f"Test Metrics: {test_metrics}")
+
+    metrics_file = os.path.join(args.save_dir, "test_metrics.json")
+    serializable = {k: v.tolist() if hasattr(v, "tolist") else v for k, v in test_metrics.items()}
+    with open(metrics_file, "w") as f:
+        json.dump(serializable, f, indent=4)
+    print(f"Test metrics saved to {metrics_file}")
