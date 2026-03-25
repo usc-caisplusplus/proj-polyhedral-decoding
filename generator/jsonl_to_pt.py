@@ -72,10 +72,14 @@ def geom_to_coords(geom: dict) -> np.ndarray:
         return np.array([[geom["coords"][0], geom["coords"][1]]], dtype=np.float32)
 
     if gtype == "polyline":
-        return np.array(geom["coords"], dtype=np.float32)
+        coords = geom["coords"]
+        if len(coords) == 0:
+            return np.zeros((0, 2), dtype=np.float32)
+        return np.array(coords, dtype=np.float32)
 
     if gtype == "polygon":
-        coords = np.array(geom["coords"], dtype=np.float32)
+        raw = geom["coords"]
+        coords = np.array(raw, dtype=np.float32).reshape(-1, 2) if raw else np.zeros((0, 2), dtype=np.float32)
         rings = [coords]
         for hole in geom.get("holes", []):
             rings.append(np.array([[np.nan, np.nan]], dtype=np.float32))
