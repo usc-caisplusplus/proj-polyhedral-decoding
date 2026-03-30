@@ -55,13 +55,13 @@ TASK_CONFIGS = {
         "/polygon_polygon_directional_relationship_360_data.pt",
         "direction-prediction",
         "polygons", "polygons",
-        8,
+        16,
     ),
     "cross_type": (
         "/polygon_polyline_topological_relationship_data.pt",
         "multi-relation",
         "polygons", "polylines",
-        3,
+        4,
     ),
 }
 
