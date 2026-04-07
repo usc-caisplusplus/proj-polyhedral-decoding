@@ -13,7 +13,7 @@ import argparse
 import json
 import os
 import random
-from typing import Dict, List, Any
+from typing import Any, Dict, List, Optional
 
 from . import geometry_generators as gen
 from . import labels
@@ -54,13 +54,14 @@ def build_sample(
     }
 
     if task == "distance":
-        sample["label"] = round(float(labels.distance_label(g1, g2)), 6)
+        # Label must match exported coordinates (g1_n, g2_n), not raw (g1, g2).
+        sample["label"] = round(float(labels.distance_label(g1_n, g2_n)), 6)
     elif task == "directional":
-        bid, lbl = labels.directional_label(g1, g2)
+        bid, lbl = labels.directional_label(g1_n, g2_n)
         sample["label_id"] = bid
         sample["label_16"] = lbl
     elif task == "topological":
-        lab = labels.topology_label(pair_type, g1, g2)
+        lab = labels.topology_label(pair_type, g1_n, g2_n)
         sample["label"] = lab
     return sample
 
@@ -84,11 +85,12 @@ def generate_records(
         attempts += 1
         complexity = COMPLEXITIES[len(records) % len(COMPLEXITIES)]
 
+        requested_topo: Optional[str] = None
         if task == "topological" and topology_mode == "targeted" and target_labels:
             # Cycle through target labels for balance
-            label = target_labels[len(records) % len(target_labels)]
+            requested_topo = target_labels[len(records) % len(target_labels)]
             try:
-                g1, g2 = topo.sample_targeted_topology_pair(rng, pair_type, label, complexity)
+                g1, g2 = topo.sample_targeted_topology_pair(rng, pair_type, requested_topo, complexity)
             except Exception:
                 g1, g2 = gen.make_pair(rng, type1, type2, complexity)
         else:
@@ -100,6 +102,10 @@ def generate_records(
         sample = build_sample(task, pair_type, g1, g2, complexity, len(records), norm_mode)
 
         if task == "topological" and sample.get("label") is None:
+            continue
+        # Labels are computed on normalized geoms; reject if sampler's raw intent
+        # does not survive normalization (common with m00 independent scaling).
+        if requested_topo is not None and sample.get("label") != requested_topo:
             continue
         records.append(sample)
 
