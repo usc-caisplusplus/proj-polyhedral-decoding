@@ -52,9 +52,9 @@ Synthetic data from `generator/` and preprocessed `.pt` bundles under `data/` ex
 ## Scientific axes explored in code
 
 1. **Choice of basis** — `moment_params.basis_type`: monomial, Fourier, Legendre (see `utils/moments_compute*.py`, `models/moment_encoder.py`).
-2. **Truncation / resolution** — `max_order` (and thus effective input size); see `ablation_input_dim.py`.
+2. **Truncation / resolution** — `max_order` (and thus effective input size); see `scripts/ablation_input_dim.py`.
 3. **Normalization of moments** — e.g. `moment_norm` in `poly2moment` (stability vs scale).
-4. **Comparison to a Fourier mesh encoder** — Poly2Vec-style GFM path (`models/fourier_encoder.py`, `models/poly2vec.py`); sweeps in `ablation_fourier.py` vary `gfm_params` such as `n_freqs`, `w_min`, `w_max`.
+4. **Comparison to a Fourier mesh encoder** — Poly2Vec-style GFM path (`models/fourier_encoder.py`, `models/poly2vec.py`); sweeps in `scripts/ablation_fourier.py` vary `gfm_params` such as `n_freqs`, `w_min`, `w_max`.
 
 These map directly to paper-worthy questions: **which basis**, **how many modes**, and **whether moments compete with or complement** a purely spectral mesh encoding.
 
@@ -83,8 +83,8 @@ Cite Poly2Vec where the Fourier encoder or methodology overlaps; distinguish thi
 | Moment bases & batch computation | `utils/moments_compute_vectorized.py`, `utils/moments_compute.py` |
 | Poly2Moment model | `models/poly2moment.py`, `models/moment_encoder.py` |
 | Poly2Vec / GFM baseline | `models/poly2vec.py`, `models/fourier_encoder.py`, `models/gfm_meshgrid.py` |
-| Moment input-dimension ablation | `ablation_input_dim.py` |
-| GFM (Fourier) ablation | `ablation_fourier.py` |
+| Moment input-dimension ablation | `scripts/ablation_input_dim.py` |
+| GFM (Fourier) ablation | `scripts/ablation_fourier.py` |
 | Synthetic probes & normalization | `generator/make_spatial_dataset.py`, `generator/normalization.py` |
 
 ---

@@ -8,12 +8,13 @@ Sweeps either:
 ``d_input`` is set from ``models.gfm_meshgrid.gfm_feature_dim`` so it always matches
 the GFM mesh size.
 
-Tasks match ``ablation_input_dim.py`` (same .pt files under ./data/Singapore).
+Tasks match ``scripts/ablation_input_dim.py`` (same .pt files under ./data/Singapore).
 
-Usage:
-    python ablation_fourier.py --mode n_freqs --n_freqs_list 3 5 7 10 12 15
-    python ablation_fourier.py --mode bandwidth --w_max_list 0.25 0.5 1.0 2.0
-    python ablation_fourier.py --tasks regression --dry_run
+Usage (from repository root):
+
+    python scripts/ablation_fourier.py --mode n_freqs --n_freqs_list 3 5 7 10 12 15
+    python scripts/ablation_fourier.py --mode bandwidth --w_max_list 0.25 0.5 1.0 2.0
+    python scripts/ablation_fourier.py --tasks regression --dry_run
 
 Results: ./results/ablation_fourier/summary.json
 """
@@ -25,6 +26,13 @@ import copy
 import json
 import os
 import sys
+from pathlib import Path
+
+_REPO = Path(__file__).resolve().parents[1]
+_SCRIPTS = Path(__file__).resolve().parent
+for _p in (_REPO, _SCRIPTS):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 from ablation_input_dim import TASK_CONFIGS, run_one
 from models.gfm_meshgrid import gfm_feature_dim
@@ -64,7 +72,8 @@ def main():
     parser.add_argument("--w_max_list", type=float, nargs="+", default=DEFAULT_W_MAX)
     parser.add_argument("--tasks", nargs="+", default=list(TASK_CONFIGS.keys()), choices=list(TASK_CONFIGS.keys()))
     parser.add_argument("--dry_run", action="store_true")
-    parser.add_argument("--config", default="config.json", help="Base JSON (must include gfm_params)")
+    default_config = str(_REPO / "config.json")
+    parser.add_argument("--config", default=default_config, help="Base JSON (must include gfm_params)")
     parser.add_argument(
         "--epochs",
         type=int,

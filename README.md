@@ -1,6 +1,19 @@
 # Poly2Vec
 
 **Poly2Vec** is a unified encoding framework that encodes points, polylines, and polygons into a fixed-length representation for spatial reasoning tasks.
+
+## Repository layout
+
+| Path | Contents |
+|------|----------|
+| `models/` | Encoders (`poly2vec`, `poly2moment`, `fourier_encoder`, `moment_encoder`, …) |
+| `utils/` | Training, moments, config, preprocessing helpers |
+| `loaders/` | PyTorch datasets |
+| `generator/` | Synthetic spatial datasets (JSONL / conversion) |
+| `scripts/` | Ablation and demo entry points (see `scripts/README.md`) |
+| `docs/` | [Research framing](docs/RESEARCH.md), [moment encoder notes](docs/MOMENT_ENCODER_README.md) |
+| `config.json` | Default training / encoder hyperparameters (repo root) |
+
 ---
 
 ## 📰 Paper
@@ -65,10 +78,10 @@ This will generate the following files inside each dataset folder:
 
 ### Generate Datasets for Training and Evaluation
 
-Run the following script:
+Run the dataset generation utilities (see `utils/dataset_generation.py` for pairwise exports), for example:
 
 ```bash
-python utils/data_generation.py
+python utils/dataset_generation.py
 ```
 
 You will get files like `polygon_polygon_topological_relationship_data.pt` in each dataset's folder.
