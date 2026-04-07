@@ -3,6 +3,8 @@ import triangle
 from shapely import Polygon
 import torch.nn as nn
 
+from models.gfm_meshgrid import gfm_meshgrid
+
 
 class GeometryFourierEncoder():
     def __init__(self, args, device='cpu'):
@@ -13,28 +15,7 @@ class GeometryFourierEncoder():
         self.V = self.V[None, :, :].to(device)
 
     def create_gfm_meshgrid(self, params: dict):
-        U = params['n_freqs']  # U is the number of points in the geometric series
-        w_min = params['w_min']
-        w_max = params['w_max']
-        g = (w_max / w_min) ** (1 / (U - 1))  # common ratio
-
-        # Generate the geometric sequence for positive frequencies
-        positive_wu = torch.tensor([w_min * g ** u for u in range(U)], dtype=torch.float32)
-
-        # Generate the sets for Wx and Wy according to the definition
-        if (2 * U + 1) % 2 == 1:  # If Nux is 2U + 1
-            Wx = torch.cat((-torch.flip(positive_wu, dims=[0]), torch.tensor([0]), positive_wu))
-        else:  # If Nux is 2U
-            Wx = torch.cat((-torch.flip(positive_wu[:-1], dims=[0]), torch.tensor([0]), positive_wu))
-
-        if U % 2 == 1:
-            Wy = torch.cat((torch.tensor([0]), positive_wu))
-        else:
-            Wy = positive_wu
-
-        # Generate the meshgrid for U and V using the geometric frequencies
-        U, V = torch.meshgrid(Wx, Wy, indexing='ij')
-        return U, V
+        return gfm_meshgrid(params)
 
     def encode(self, geom_dataset: torch.Tensor, lengths: torch.Tensor, dataset_type: str):
         geom_dataset = geom_dataset.to(self.device)

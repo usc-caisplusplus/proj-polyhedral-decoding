@@ -123,7 +123,10 @@ def run_one(args, device, data_tuple, dry_run=False):
         trainer.run(epochs=args.epochs, verbose=VERBOSE, patience=args.patience)
 
     best_path = os.path.join(args.save_dir, "best.pth.tar")
-    best_model = load_model_checkpoint(best_path, model)
+    if dry_run or not os.path.isfile(best_path):
+        best_model = model
+    else:
+        best_model = load_model_checkpoint(best_path, model)
     test_metrics = trainer.test(test_loader, best_model)
 
     return {k: v.tolist() if hasattr(v, "tolist") else v for k, v in test_metrics.items()}
