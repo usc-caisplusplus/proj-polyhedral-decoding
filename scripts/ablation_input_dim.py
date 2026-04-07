@@ -9,17 +9,26 @@ Tasks swept:
   - directional:    polygon_polygon_directional_relationship_360_data.pt (direction-prediction, polygons/polygons, 8 cls)
   - cross_type:     polygon_polyline_topological_relationship_data.pt (multi-relation, polygons/polylines, 3 cls)
 
-Usage:
-    python ablation_input_dim.py [--max_orders 2 4 6 8 10 12 14] [--tasks regression topo_multiclass directional cross_type] [--dry_run]
+Usage (from repository root):
+
+    python scripts/ablation_input_dim.py [--max_orders 2 4 6 8 10 12 14] [--tasks regression topo_multiclass directional cross_type] [--dry_run]
 
 Results saved to ./results/ablation_input_dim/summary.json
 """
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+_REPO = Path(__file__).resolve().parents[1]
+if str(_REPO) not in sys.path:
+    sys.path.insert(0, str(_REPO))
 
 import argparse
 import copy
 import json
 import os
-import sys
 import torch
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
@@ -123,7 +132,10 @@ def run_one(args, device, data_tuple, dry_run=False):
         trainer.run(epochs=args.epochs, verbose=VERBOSE, patience=args.patience)
 
     best_path = os.path.join(args.save_dir, "best.pth.tar")
-    best_model = load_model_checkpoint(best_path, model)
+    if dry_run or not os.path.isfile(best_path):
+        best_model = model
+    else:
+        best_model = load_model_checkpoint(best_path, model)
     test_metrics = trainer.test(test_loader, best_model)
 
     return {k: v.tolist() if hasattr(v, "tolist") else v for k, v in test_metrics.items()}
@@ -139,7 +151,7 @@ def main():
                         help="Skip training; just test model instantiation and data loading")
     cli = parser.parse_args()
 
-    base_args = args_parser("config.json")
+    base_args = args_parser(str(_REPO / "config.json"))
     device = torch.device("cuda" if torch.cuda.is_available() and base_args.device == "cuda" else "cpu")
     print(f"Device: {device}")
 
@@ -163,7 +175,7 @@ def main():
         for max_order in cli.max_orders:
             d_input = (max_order + 1) ** 2
             print(f"\n  {'='*54}")
-            print(f"  max_order={max_order}  →  d_input={d_input}")
+            print(f"  max_order={max_order}  ->  d_input={d_input}")
             print(f"  {'='*54}")
 
             args = build_args_for_order(base_args, max_order, task_cfg)
@@ -196,7 +208,7 @@ def main():
 
     # ── pretty-print table ─────────────────────────────────────────────────────
     for task_name, task_results in summary.items():
-        print(f"\n── {task_name} ──")
+        print(f"\n-- {task_name} --")
         print(f"  {'max_order':>10}  {'d_input':>8}  {'status':>8}  metrics")
         print(f"  {'-'*64}")
         for order_str, entry in task_results.items():

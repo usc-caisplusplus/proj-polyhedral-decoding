@@ -1,11 +1,11 @@
-"""
-Comparison script for Fourier-based vs Moment-based encoders.
+"""Comparison script for Fourier-based vs Moment-based encoders (run from repo root: ``python scripts/compare_encoders.py``)."""
 
-This script compares:
-1. Encoding output shapes
-2. Feature characteristics
-3. Computational considerations
-"""
+import sys
+from pathlib import Path
+
+_REPO = Path(__file__).resolve().parents[1]
+if str(_REPO) not in sys.path:
+    sys.path.insert(0, str(_REPO))
 
 import torch
 import numpy as np

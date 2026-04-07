@@ -5,3 +5,12 @@ Singapore
 log.txt
 data
 results
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.zip
+
+# Local experiment logs
+*.log

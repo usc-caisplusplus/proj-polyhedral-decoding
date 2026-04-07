@@ -1,11 +1,11 @@
-"""
-Example script demonstrating the usage of the moment-based encoder.
+"""Example usage of the moment-based encoder (run from repo root: ``python scripts/example_moment_encoder.py``)."""
 
-This script shows how to:
-1. Initialize the GeometryMomentEncoder
-2. Encode different geometry types (points, lines, polylines, polygons)
-3. Use the Poly2Moment model for embedding generation
-"""
+import sys
+from pathlib import Path
+
+_REPO = Path(__file__).resolve().parents[1]
+if str(_REPO) not in sys.path:
+    sys.path.insert(0, str(_REPO))
 
 import torch
 import numpy as np
@@ -94,20 +94,16 @@ def example_polyline_encoding():
     encoder = GeometryMomentEncoder(args, device='cpu')
 
     # Create sample polylines (padded to max length)
-    # Polyline 1: triangle path with 4 points
-    # Polyline 2: square path with 5 points (padded with zeros)
     polylines = torch.tensor([
         [[0.0, 0.0], [1.0, 0.0], [0.5, 1.0], [0.0, 0.0], [0.0, 0.0]],
         [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], [0.0, 0.0]]
     ], dtype=torch.float32)
 
-    # Actual lengths (excluding padding)
     lengths = torch.tensor([4, 5], dtype=torch.long)
 
     print(f"Input polylines shape: {polylines.shape}")
     print(f"Lengths: {lengths}")
 
-    # Encode polylines
     encoded = encoder.polyline_encoder(polylines, lengths)
     print(f"\nEncoded moments shape: {encoded.shape}")
     print(f"\nMoments for triangle polyline (first 3x3):")
@@ -128,21 +124,16 @@ def example_polygon_encoding():
 
     encoder = GeometryMomentEncoder(args, device='cpu')
 
-    # Create sample polygons
-    # Polygon 1: triangle
-    # Polygon 2: square (padded with zeros)
     polygons = torch.tensor([
         [[0.0, 0.0], [1.0, 0.0], [0.5, 1.0], [0.0, 0.0], [0.0, 0.0]],
         [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], [0.0, 0.0]]
     ], dtype=torch.float32)
 
-    # Actual vertex counts
     lengths = torch.tensor([3, 4], dtype=torch.long)
 
     print(f"Input polygons shape: {polygons.shape}")
     print(f"Vertex counts: {lengths}")
 
-    # Encode polygons
     encoded = encoder.polygon_encoder(polygons, lengths)
     print(f"\nEncoded area moments shape: {encoded.shape}")
     print(f"\nArea moments for triangle (first 4x4):")
@@ -158,10 +149,9 @@ def example_full_model():
     print("Example 5: Full Poly2Moment Model")
     print("="*60)
 
-    # Configure model
     args = SimpleNamespace(
         moment_params={'basis_type': 'monomial', 'max_order': 10},
-        d_input=121,  # (10+1)^2 = 121
+        d_input=121,
         d_hid=64,
         d_out=32,
         dropout=0.1,
@@ -170,11 +160,9 @@ def example_full_model():
 
     from models.poly2moment import Poly2Moment
 
-    # Initialize model
     model = Poly2Moment(args, device='cpu')
     model.eval()
 
-    # Create sample polygons
     polygons = torch.tensor([
         [[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0], [0.0, 0.0]],
         [[0.0, 0.0], [1.0, 0.0], [0.5, 1.0], [0.0, 0.0], [0.0, 0.0]]
@@ -185,7 +173,6 @@ def example_full_model():
     print(f"Input: 2 polygons (square and triangle)")
     print(f"Shapes: {polygons.shape}, lengths: {lengths}")
 
-    # Generate embeddings
     with torch.no_grad():
         embeddings = model(polygons, lengths, dataset_type='polygons')
 
@@ -194,7 +181,6 @@ def example_full_model():
     print(f"\nSquare embedding (first 10 dims): {embeddings[0, :10]}")
     print(f"Triangle embedding (first 10 dims): {embeddings[1, :10]}")
 
-    # Compute similarity
     similarity = torch.nn.functional.cosine_similarity(
         embeddings[0:1], embeddings[1:2]
     )
@@ -209,27 +195,24 @@ def compare_bases():
 
     from models.moment_encoder import GeometryMomentEncoder
 
-    # Same polygon, different bases
     polygon = torch.tensor([
         [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
     ], dtype=torch.float32)
     length = torch.tensor([4], dtype=torch.long)
 
-    # Monomial basis
     args_mono = SimpleNamespace(
         moment_params={'basis_type': 'monomial', 'max_order': 5}
     )
     encoder_mono = GeometryMomentEncoder(args_mono, device='cpu')
     moments_mono = encoder_mono.polygon_encoder(polygon, length)
 
-    # Legendre basis
     args_leg = SimpleNamespace(
         moment_params={'basis_type': 'legendre', 'max_order': 5}
     )
     encoder_leg = GeometryMomentEncoder(args_leg, device='cpu')
     moments_leg = encoder_leg.polygon_encoder(polygon, length)
 
-    print("Unit square polygon: [0,1] × [0,1]")
+    print("Unit square polygon: [0,1] x [0,1]")
     print(f"\nMonomial moments (first 4x4):")
     print(moments_mono[0, :4, :4])
     print(f"\nLegendre moments (first 4x4):")
@@ -243,39 +226,21 @@ def compare_bases():
 
 if __name__ == "__main__":
     print("\n" + "="*60)
-    print("Poly2Vec Moment Encoder Examples")
+    print("Poly2Moment encoder examples")
     print("="*60)
 
-    # Run examples
-    try:
-        example_point_encoding()
-    except Exception as e:
-        print(f"Error in point encoding: {e}")
-
-    try:
-        example_line_encoding()
-    except Exception as e:
-        print(f"Error in line encoding: {e}")
-
-    try:
-        example_polyline_encoding()
-    except Exception as e:
-        print(f"Error in polyline encoding: {e}")
-
-    try:
-        example_polygon_encoding()
-    except Exception as e:
-        print(f"Error in polygon encoding: {e}")
-
-    try:
-        example_full_model()
-    except Exception as e:
-        print(f"Error in full model: {e}")
-
-    try:
-        compare_bases()
-    except Exception as e:
-        print(f"Error in basis comparison: {e}")
+    for fn in (
+        example_point_encoding,
+        example_line_encoding,
+        example_polyline_encoding,
+        example_polygon_encoding,
+        example_full_model,
+        compare_bases,
+    ):
+        try:
+            fn()
+        except Exception as e:
+            print(f"Error in {fn.__name__}: {e}")
 
     print("\n" + "="*60)
     print("Examples completed!")
