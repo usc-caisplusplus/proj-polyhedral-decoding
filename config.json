@@ -1,19 +1,19 @@
 {
     "project_name": "Poly2Moment",
     "dataset_name": "NewYork",
-    "dataset": "NewYork_polylines_polylines_topological",
-    "dataset_type1": "polylines",
+    "dataset": "topo_polygon_polyline_multiclass",
+    "dataset_type1": "polygons",
     "dataset_type2": "polylines",
     "task": "multi-relation",
     "num_classes": 2,
     "data_path": "./data/NewYork",
-    "data_file": "/polygon_point_contain_data.pt",
+    "data_file": "/polygon_polyline_topological_relationship_data.pt",
     "save_dir": "./results/",
     "training": true,
 
     "encoder_type": "poly2moment",
     "fusion": "learned_fusion",
-    "sampling_strategy": "legendre",
+    "sampling_strategy": "fourier",
 
     "batch_size": 128,
     "lr": 1e-4,
@@ -30,9 +30,9 @@
     },
 
     "moment_params": {
-        "basis_type": "legendre",
+        "basis_type": "fourier",
         "max_order": 14,
-        "moment_norm": "sign_log"
+        "moment_norm": "m00_scale"
     },
 
     "device": "cuda",

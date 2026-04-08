@@ -14,3 +14,7 @@ __pycache__/
 
 # Local experiment logs
 *.log
+
+# Aggregated metrics and generated tables (local)
+all_metrics_v2.csv
+tables/

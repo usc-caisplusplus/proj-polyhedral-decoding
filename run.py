@@ -57,7 +57,21 @@ if __name__ == "__main__":
 
     args.save_dir = get_save_dir(f"{args.save_dir}/{run_name}", training=args.training)
 
-    # create a Poly2Vec model
+    # read dataset
+    X1, X2, L1, L2, Y = torch.load(args.data_path + args.data_file)
+
+    # Infer num_classes from scalar class-id labels (needed before model is built).
+    if args.task in ("multi-relation", "direction-prediction"):
+        try:
+            y_cpu = Y.detach().cpu()
+            if y_cpu.dim() == 1 and y_cpu.numel() > 0:
+                inferred = int(y_cpu.max().item()) + 1
+                if args.num_classes is None or int(args.num_classes) != inferred:
+                    args.num_classes = inferred
+        except Exception:
+            pass
+
+    # create model (must happen after args.num_classes is correct)
     geometry_model = GeometryEncoder(args, device).to(device)
     model = TaskEncoder(args, geometry_model, device).to(device)
 
@@ -73,7 +87,7 @@ if __name__ == "__main__":
         print(f"Unknown task {args.task}!")
 
     # Train the model first
-    # Save args
+    # Save args (after any overrides like inferred num_classes)
     args_file = os.path.join(args.save_dir, "args.json")
     with open(args_file, "w") as f:
         json.dump(vars(args), f, indent=4, sort_keys=True)
@@ -81,9 +95,6 @@ if __name__ == "__main__":
     checkpoint_saver = CheckpointSaver(
         args.save_dir, metric_name="eval_loss", maximize_metric=False
     )
-
-    # read dataset
-    X1, X2, L1, L2, Y = torch.load(args.data_path + args.data_file)
     # split dataset
     X1_train, X1_other, X2_train, X2_other, L1_train, L1_other, L2_train, L2_other, Y_train, Y_other = train_test_split(X1, X2, L1, L2, Y, test_size=0.4)
     X1_val, X1_test, X2_val, X2_test, L1_val, L1_test, L2_val, L2_test, Y_val, Y_test = train_test_split(X1_other, X2_other, L1_other, L2_other, Y_other, test_size=0.5)
