@@ -47,7 +47,7 @@ if __name__ == "__main__":
         if hasattr(args, param):
             setattr(args, param, value)
 
-    run_name = f'[{args.encoder_type}]: {args.dataset}_sampling strategy: {args.sampling_strategy}_FT fusion: {args.fusion}_task: {args.task}'
+    run_name = f'[{args.encoder_type}]_{args.dataset}_sampling-strategy_{args.sampling_strategy}_FT-fusion_{args.fusion}_task_{args.task}'
     print(run_name)
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.device == "cuda" else "cpu")

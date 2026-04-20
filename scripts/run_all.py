@@ -257,7 +257,7 @@ def _build_run_config(
 def main() -> None:
     p = argparse.ArgumentParser(description="Run all tasks × datasets × encoders via config.json rewriting.")
     p.add_argument("--results_root", type=str, default="./results_v2", help="Clean output root")
-    p.add_argument("--epochs", type=int, default=1, help="Epochs per run (use 1 for quick smoke tests)")
+    p.add_argument("--epochs", type=int, default=50, help="Epochs per run (use 1 for quick smoke tests)")
     p.add_argument("--patience", type=int, default=10)
     p.add_argument("--device", type=str, default=None, help='Override config.json device ("cpu" or "cuda")')
     p.add_argument("--max_runs", type=int, default=None, help="Cap total runs (debugging)")
