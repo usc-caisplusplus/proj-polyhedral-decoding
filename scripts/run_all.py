@@ -249,8 +249,6 @@ def _build_run_config(
     if device is not None:
         cfg["device"] = device
 
-    # set save_dir to a temporary staging dir; we'll move/rename after the run
-    cfg["save_dir"] = "./results/_staging"
     return cfg
 
 
@@ -303,6 +301,7 @@ def main() -> None:
                 patience=int(args.patience),
                 device=args.device,
             )
+            cfg["save_dir"] = str(project_root / "results" / "_staging")
 
             if args.dry_run:
                 continue
