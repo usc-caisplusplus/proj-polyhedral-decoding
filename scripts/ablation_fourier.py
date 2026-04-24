@@ -80,6 +80,17 @@ def main():
         default=None,
         help="Override training epochs (default: config.json). Use a small value for quick smoke tests.",
     )
+    parser.add_argument(
+        "--device",
+        choices=["auto", "cuda", "cpu"],
+        default="auto",
+        help="auto: use config.json if CUDA available; cuda: require GPU; cpu: CPU only.",
+    )
+    parser.add_argument(
+        "--data_root",
+        default="./data/Singapore",
+        help="Folder containing task .pt files (default: ./data/Singapore).",
+    )
     cli = parser.parse_args()
 
     base_args = args_parser(cli.config)
@@ -99,12 +110,25 @@ def main():
 
     import torch
 
-    device = torch.device("cuda" if torch.cuda.is_available() and base_args.device == "cuda" else "cpu")
+    if cli.device == "cuda":
+        if not torch.cuda.is_available():
+            print("ERROR: --device cuda but CUDA is not available.", file=sys.stderr)
+            raise SystemExit(1)
+        device = torch.device("cuda")
+    elif cli.device == "cpu":
+        device = torch.device("cpu")
+    else:
+        device = torch.device(
+            "cuda" if torch.cuda.is_available() and getattr(base_args, "device", "cpu") == "cuda" else "cpu"
+        )
     print(f"Device: {device}")
+
+    data_root = Path(cli.data_root).resolve()
 
     for task_name in cli.tasks:
         task_cfg = TASK_CONFIGS[task_name]
-        data_path = "./data/Singapore" + task_cfg[0]
+        rel = task_cfg[0].lstrip("/")
+        data_path = str(data_root / rel)
 
         print(f"\n{'#' * 60}")
         print(f"  TASK: {task_name}")
