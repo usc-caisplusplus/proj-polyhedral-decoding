@@ -72,6 +72,14 @@ https://drive.google.com/drive/folders/119KvtA1K9CbII6TMMSPXkd1Yjrxhv9-P?usp=sha
 
 Place unpacked data under `./data/` (ignored by git). Example layout: `./data/Singapore/`, `./data/NewYork/`.
 
+If you have **`Singapore.zip`** and **`NewYork.zip`** at the repo root (same layout as the Drive bundles), extract them in one step:
+
+```bash
+python scripts/setup_data.py
+```
+
+This creates `./data/Singapore/*.pt` and `./data/NewYork/*.pt` for `run.py` and the ablation scripts.
+
 ---
 
 ## Data preprocessing (OSM)
