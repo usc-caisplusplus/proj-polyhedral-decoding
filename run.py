@@ -3,7 +3,7 @@ import json, os, argparse
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
 
-from loaders.dataloader import GeometryRelationshipDataset
+from loaders.dataloader import GeometryRelationshipDataset, GeometryRelationshipDataset3D
 from utils.utils import CheckpointSaver, get_save_dir, load_model_checkpoint
 from utils.config import args_parser
 from models.TaskEncoder import TaskEncoder
@@ -52,13 +52,19 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.device == "cuda" else "cpu")
     print("using device:", device)
-    if args.encoder_type == "poly2moment":
+    if args.encoder_type in ("poly2moment", "poly2moment_3d"):
         print("moment_params:", args.moment_params)
 
     args.save_dir = get_save_dir(f"{args.save_dir}/{run_name}", training=args.training)
 
-    # read dataset
-    X1, X2, L1, L2, Y = torch.load(args.data_path + args.data_file)
+    # read dataset — 3D files have 7 fields, 2D files have 5
+    raw = torch.load(args.data_path + args.data_file)
+    is_3d = (len(raw) == 7)
+    if is_3d:
+        X1, X2, L1, L2, FC1, FC2, Y = raw
+    else:
+        X1, X2, L1, L2, Y = raw
+        FC1 = FC2 = None
 
     # Infer num_classes from scalar class-id labels (needed before model is built).
     if args.task in ("multi-relation", "direction-prediction"):
@@ -86,7 +92,6 @@ if __name__ == "__main__":
     else:
         print(f"Unknown task {args.task}!")
 
-    # Train the model first
     # Save args (after any overrides like inferred num_classes)
     args_file = os.path.join(args.save_dir, "args.json")
     with open(args_file, "w") as f:
@@ -95,19 +100,35 @@ if __name__ == "__main__":
     checkpoint_saver = CheckpointSaver(
         args.save_dir, metric_name="eval_loss", maximize_metric=False
     )
+
     # split dataset
-    X1_train, X1_other, X2_train, X2_other, L1_train, L1_other, L2_train, L2_other, Y_train, Y_other = train_test_split(X1, X2, L1, L2, Y, test_size=0.4)
-    X1_val, X1_test, X2_val, X2_test, L1_val, L1_test, L2_val, L2_test, Y_val, Y_test = train_test_split(X1_other, X2_other, L1_other, L2_other, Y_other, test_size=0.5)
+    if is_3d:
+        (X1_train, X1_other, X2_train, X2_other,
+         L1_train, L1_other, L2_train, L2_other,
+         FC1_train, FC1_other, FC2_train, FC2_other,
+         Y_train, Y_other) = train_test_split(X1, X2, L1, L2, FC1, FC2, Y, test_size=0.4)
+        (X1_val, X1_test, X2_val, X2_test,
+         L1_val, L1_test, L2_val, L2_test,
+         FC1_val, FC1_test, FC2_val, FC2_test,
+         Y_val, Y_test) = train_test_split(X1_other, X2_other, L1_other, L2_other,
+                                            FC1_other, FC2_other, Y_other, test_size=0.5)
+        train_dataset = GeometryRelationshipDataset3D(X1_train, X2_train, L1_train, L2_train, FC1_train, FC2_train, Y_train)
+        val_dataset   = GeometryRelationshipDataset3D(X1_val,   X2_val,   L1_val,   L2_val,   FC1_val,   FC2_val,   Y_val)
+        test_dataset  = GeometryRelationshipDataset3D(X1_test,  X2_test,  L1_test,  L2_test,  FC1_test,  FC2_test,  Y_test)
+    else:
+        (X1_train, X1_other, X2_train, X2_other,
+         L1_train, L1_other, L2_train, L2_other,
+         Y_train, Y_other) = train_test_split(X1, X2, L1, L2, Y, test_size=0.4)
+        (X1_val, X1_test, X2_val, X2_test,
+         L1_val, L1_test, L2_val, L2_test,
+         Y_val, Y_test) = train_test_split(X1_other, X2_other, L1_other, L2_other, Y_other, test_size=0.5)
+        train_dataset = GeometryRelationshipDataset(X1_train, X2_train, L1_train, L2_train, Y_train)
+        val_dataset   = GeometryRelationshipDataset(X1_val,   X2_val,   L1_val,   L2_val,   Y_val)
+        test_dataset  = GeometryRelationshipDataset(X1_test,  X2_test,  L1_test,  L2_test,  Y_test)
 
-    # batchify
-    train_dataset = GeometryRelationshipDataset(X1_train, X2_train, L1_train, L2_train, Y_train)
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-
-    val_dataset = GeometryRelationshipDataset(X1_val, X2_val, L1_val, L2_val, Y_val)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
-
-    test_dataset = GeometryRelationshipDataset(X1_test, X2_test, L1_test, L2_test, Y_test)
-    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
+    val_loader   = DataLoader(val_dataset,   batch_size=args.batch_size, shuffle=False)
+    test_loader  = DataLoader(test_dataset,  batch_size=args.batch_size, shuffle=False)
 
     trainer = Trainer(model,
                       optimizer,

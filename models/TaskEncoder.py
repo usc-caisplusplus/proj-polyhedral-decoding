@@ -19,9 +19,9 @@ class TaskEncoder(nn.Module):
             nn.Linear(args.d_out, args.num_classes)
         )
 
-    def forward(self, x1, len1, dataset_type1, x2, len2, dataset_type2):
-        x1_emb = self.geometry_encoder(x1, len1, dataset_type1)
-        x2_emb = self.geometry_encoder(x2, len2, dataset_type2)
+    def forward(self, x1, len1, dataset_type1, x2, len2, dataset_type2, fc1=None, fc2=None):
+        x1_emb = self.geometry_encoder(x1, len1, dataset_type1, face_counts=fc1)
+        x2_emb = self.geometry_encoder(x2, len2, dataset_type2, face_counts=fc2)
         if self.task == "relation-prediction":
             logits = torch.bmm(x1_emb.view(x1.shape[0], 1, -1), x2_emb.view(x2.shape[0], -1, 1)).squeeze()
             logits = torch.sigmoid(logits)

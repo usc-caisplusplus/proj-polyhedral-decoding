@@ -67,19 +67,31 @@ class Trainer:
                 break
         return (train_loss, eval_loss)
 
+    def _unpack_batch(self, batch):
+        """Unpack a 5-tuple (2D) or 7-tuple (3D) batch into (x1,x2,l1,l2,fc1,fc2,y)."""
+        if len(batch) == 7:
+            x1, x2, l1, l2, fc1, fc2, y = batch
+            return (x1.to(self.device), x2.to(self.device),
+                    l1.to(self.device), l2.to(self.device),
+                    fc1.to(self.device), fc2.to(self.device),
+                    y.to(self.device))
+        else:
+            x1, x2, l1, l2, y = batch
+            none = None
+            return (x1.to(self.device), x2.to(self.device),
+                    l1.to(self.device), l2.to(self.device),
+                    none, none,
+                    y.to(self.device))
+
     def train(self):
         self.model.train()
         train_loss = []
         for batch in tqdm(self.train_loader):
-            # get batch
-            x1 = batch[0].to(self.device)
-            x2 = batch[1].to(self.device)
-            len1 = batch[2].to(self.device)
-            len2 = batch[3].to(self.device)
-            y = batch[4].to(self.device)
+            x1, x2, len1, len2, fc1, fc2, y = self._unpack_batch(batch)
             # zero the gradients
             self.optimizer.zero_grad()
-            logits = self.model(x1, len1, self.args.dataset_type1, x2, len2, self.args.dataset_type2)
+            logits = self.model(x1, len1, self.args.dataset_type1, x2, len2, self.args.dataset_type2,
+                                fc1=fc1, fc2=fc2)
 
             if self.args.task == "multi-relation" or self.args.task == "direction-prediction":
                 y = y.type(torch.LongTensor).to(self.device)
@@ -102,14 +114,10 @@ class Trainer:
         y_true_multi = []
         with torch.no_grad():
             for batch in tqdm(self.val_loader, desc="Validating"):
-                # get batch
-                x1 = batch[0].to(self.device)
-                x2 = batch[1].to(self.device)
-                len1 = batch[2].to(self.device)
-                len2 = batch[3].to(self.device)
-                y = batch[4].to(self.device)
+                x1, x2, len1, len2, fc1, fc2, y = self._unpack_batch(batch)
                 # forward pass
-                logits = self.model(x1, len1, self.args.dataset_type1, x2, len2, self.args.dataset_type2)
+                logits = self.model(x1, len1, self.args.dataset_type1, x2, len2, self.args.dataset_type2,
+                                    fc1=fc1, fc2=fc2)
 
                 if self.args.task == "multi-relation" or self.args.task == "direction-prediction":
                     y = y.type(torch.LongTensor).to(self.device)
@@ -179,13 +187,9 @@ class Trainer:
         y_true_multi = []
         with torch.no_grad():
             for batch in test_loader:
-                # get batch
-                x1 = batch[0].to(self.device)
-                x2 = batch[1].to(self.device)
-                len1 = batch[2].to(self.device)
-                len2 = batch[3].to(self.device)
-                y = batch[4].to(self.device)
-                logits = self.model(x1, len1, self.args.dataset_type1, x2, len2, self.args.dataset_type2)
+                x1, x2, len1, len2, fc1, fc2, y = self._unpack_batch(batch)
+                logits = self.model(x1, len1, self.args.dataset_type1, x2, len2, self.args.dataset_type2,
+                                    fc1=fc1, fc2=fc2)
 
                 if self.args.task == "multi-relation" or self.args.task == "direction-prediction":
                     y = y.type(torch.LongTensor).to(self.device)

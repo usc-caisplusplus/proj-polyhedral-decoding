@@ -36,6 +36,36 @@ class GeometryRelationshipDataset(Dataset):
         return x1, x2, l1, l2, y
 
 
+class GeometryRelationshipDataset3D(Dataset):
+    """
+    Dataset for 3D geometry pairs produced by convert_jsonl_to_pt_3d.py.
+
+    Each sample is a 7-tuple: (x1, x2, l1, l2, fc1, fc2, y)
+    where fc1/fc2 are triangular face counts for polyhedra (0 for points/polylines).
+    """
+
+    def __init__(self, X1, X2, L1, L2, FC1, FC2, Y):
+        super().__init__()
+        self.X1  = X1
+        self.X2  = X2
+        self.L1  = L1
+        self.L2  = L2
+        self.FC1 = FC1
+        self.FC2 = FC2
+        self.Y   = Y
+
+    def __len__(self) -> int:
+        return len(self.X1)
+
+    def __getitem__(self, idx: int):
+        return (
+            self.X1[idx], self.X2[idx],
+            self.L1[idx], self.L2[idx],
+            self.FC1[idx], self.FC2[idx],
+            self.Y[idx],
+        )
+
+
 class RegionLoader(torch.utils.data.Dataset):
     def __init__(self, region_features, attn_masks, labels):
         # load region features
