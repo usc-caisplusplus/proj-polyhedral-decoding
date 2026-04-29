@@ -122,10 +122,23 @@ class Poly2Moment(nn.Module):
 
         # Flatten the moment tensor: (B, O, O) -> (B, O*O)
         if torch.is_complex(x_encoded):
-            x_real = x_encoded.real.reshape(B, -1)
-            x_imag = x_encoded.imag.reshape(B, -1)
-            x_flat_real = self._normalize(x_real)
-            x_flat_imag = self._normalize(x_imag)
+            # The (0,0) Fourier moment is always real-valued (imag part is exactly 0
+            # for points, polylines, polygons). Splitting real/imag and then calling
+            # _normalize independently with `m00_scale` would divide the imag stream
+            # by clamp(0, 1e-6) = 1e-6, blowing it up by ~1e6. Compute the divisor
+            # from the complex (0,0) magnitude and apply it once to both streams.
+            x_complex_flat = x_encoded.reshape(B, -1)
+            if self.moment_norm == 'm00_scale':
+                m00_mag = x_complex_flat[:, 0:1].abs().clamp(min=1e-6)
+                x_real = (x_complex_flat.real / m00_mag).to(torch.float32)
+                x_imag = (x_complex_flat.imag / m00_mag).to(torch.float32)
+                x_flat_real = x_real
+                x_flat_imag = x_imag
+            else:
+                x_real = x_complex_flat.real.to(torch.float32)
+                x_imag = x_complex_flat.imag.to(torch.float32)
+                x_flat_real = self._normalize(x_real)
+                x_flat_imag = self._normalize(x_imag)
         else:
             x_flat = x_encoded.reshape(B, -1)
             # sign_log: stream1=log-magnitude, stream2=sign (mirrors mag/phase split)
