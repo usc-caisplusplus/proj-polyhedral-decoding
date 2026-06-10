@@ -53,7 +53,7 @@ Synthetic data from `generator/` and preprocessed `.pt` bundles under `data/` ex
 
 1. **Choice of basis** — `moment_params.basis_type`: monomial, Fourier, Legendre (see `utils/moments_compute*.py`, `models/moment_encoder.py`).
 2. **Truncation / resolution** — `max_order` (and thus effective input size); see `scripts/ablation_input_dim.py`.
-3. **Normalization of moments** — e.g. `moment_norm` in `poly2moment` (stability vs scale).
+3. **Normalization of moments** — `poly2moment` uses fixed `m00_scale` normalization for stability while restoring explicit scale and position features.
 4. **Comparison to a Fourier mesh encoder** — Poly2Vec-style GFM path (`models/fourier_encoder.py`, `models/poly2vec.py`); sweeps in `scripts/ablation_fourier.py` vary `gfm_params` such as `n_freqs`, `w_min`, `w_max`.
 
 These map directly to paper-worthy questions: **which basis**, **how many modes**, and **whether moments compete with or complement** a purely spectral mesh encoding.

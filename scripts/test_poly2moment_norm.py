@@ -1,5 +1,5 @@
 """
-Regression tests for Poly2Moment normalization (real and complex bases).
+Regression tests for Poly2Moment m00 scaling (real and complex bases).
 
 Guards against the "Fourier + m00_scale destroys imag stream" bug
 (commit af11fda). The (0,0) Fourier moment is always real-valued for
@@ -7,9 +7,9 @@ points / polylines / polygons; an earlier version of the model split
 real/imag *before* per-stream m00_scale, which divided the imag stream
 by clamp(0, 1e-6) and amplified it by ~1e6. This file pins down:
 
-  - all (basis x geom_type x moment_norm) forward passes stay finite,
+  - all (basis x geom_type) forward passes stay finite,
   - distinct inputs produce distinct embeddings,
-  - the imag stream of Fourier + m00_scale stays bounded after _normalize,
+  - the imag stream of Fourier moments stays bounded after m00 scaling,
   - a "buggy reference" implementation reproduces the 1e6 blow-up
     (so any future regression that re-introduces the per-stream split
     would reactivate the differential check).
@@ -43,7 +43,7 @@ class Args:
     pass
 
 
-def make_args(basis_type: str, moment_norm: str, max_order: int = 14):
+def make_args(basis_type: str, max_order: int = 14):
     a = Args()
     a.fusion = "learned_fusion"
     a.d_input = (max_order + 1) ** 2
@@ -53,9 +53,19 @@ def make_args(basis_type: str, moment_norm: str, max_order: int = 14):
     a.moment_params = {
         "basis_type": basis_type,
         "max_order": max_order,
-        "moment_norm": moment_norm,
+        "moment_norm": "m00_scale",
     }
     return a
+
+
+def test_only_m00_scale_supported(device):
+    args = make_args("monomial")
+    args.moment_params["moment_norm"] = "none"
+    try:
+        Poly2Moment(args, device)
+    except ValueError as exc:
+        return [] if "only supports moment_norm='m00_scale'" in str(exc) else [str(exc)]
+    return ["unsupported normalization was accepted"]
 
 
 def make_synthetic_batch(geom_type: str, B: int, device):
@@ -93,41 +103,39 @@ def make_synthetic_batch(geom_type: str, B: int, device):
 
 
 # ---------------------------------------------------------------------------
-# Test 1: forward-pass invariants on the full (basis, geom, norm) grid
+# Test 1: forward-pass invariants on the full (basis, geom) grid
 # ---------------------------------------------------------------------------
 
 def test_forward_invariants(device):
     print("\n" + "=" * 78)
-    print("Test 1 — forward invariants over (basis x geom x norm)")
+    print("Test 1 — forward invariants over (basis x geom)")
     print("=" * 78)
 
     bases = ["monomial", "fourier", "legendre"]
     geoms = ["points", "polylines", "polygons"]
-    norms = ["none", "m00_scale", "sign_log", "layer_norm"]
 
     failures = []
     for basis in bases:
         for geom in geoms:
-            for norm in norms:
-                args = make_args(basis, norm)
-                torch.manual_seed(0)
-                model = Poly2Moment(args, device).to(device).eval()
-                x, lengths = make_synthetic_batch(geom, B=8, device=device)
-                with torch.no_grad():
-                    out = model(x, lengths, dataset_type=geom)
-                tag = f"{basis:9s} | {geom:9s} | {norm:11s}"
-                ok_shape = tuple(out.shape) == (8, 32)
-                ok_finite = torch.isfinite(out).all().item()
-                ok_var = out.std().item() > 1e-6
-                ok_range = out.abs().max().item() < 1e3
-                pdists = (out.unsqueeze(0) - out.unsqueeze(1)).norm(dim=2)
-                positives = pdists[pdists > 0]
-                ok_distinct = (positives.numel() > 0 and positives.min().item() > 1e-5)
-                status = "OK " if (ok_shape and ok_finite and ok_var and ok_range and ok_distinct) else "FAIL"
-                print(f"  [{status}] {tag} | range=[{out.min().item():+.3g},{out.max().item():+.3g}] std={out.std().item():.3g}")
-                if status == "FAIL":
-                    failures.append((basis, geom, norm,
-                                     ok_shape, ok_finite, ok_var, ok_range, ok_distinct))
+            args = make_args(basis)
+            torch.manual_seed(0)
+            model = Poly2Moment(args, device).to(device).eval()
+            x, lengths = make_synthetic_batch(geom, B=8, device=device)
+            with torch.no_grad():
+                out = model(x, lengths, dataset_type=geom)
+            tag = f"{basis:9s} | {geom:9s}"
+            ok_shape = tuple(out.shape) == (8, 32)
+            ok_finite = torch.isfinite(out).all().item()
+            ok_var = out.std().item() > 1e-6
+            ok_range = out.abs().max().item() < 1e3
+            pdists = (out.unsqueeze(0) - out.unsqueeze(1)).norm(dim=2)
+            positives = pdists[pdists > 0]
+            ok_distinct = (positives.numel() > 0 and positives.min().item() > 1e-5)
+            status = "OK " if (ok_shape and ok_finite and ok_var and ok_range and ok_distinct) else "FAIL"
+            print(f"  [{status}] {tag} | range=[{out.min().item():+.3g},{out.max().item():+.3g}] std={out.std().item():.3g}")
+            if status == "FAIL":
+                failures.append((basis, geom,
+                                 ok_shape, ok_finite, ok_var, ok_range, ok_distinct))
     return failures
 
 
@@ -142,7 +150,7 @@ def test_fourier_m00_imag_bounded(device):
 
     failures = []
     for geom in ["points", "polylines", "polygons"]:
-        args = make_args("fourier", "m00_scale")
+        args = make_args("fourier")
         torch.manual_seed(0)
         encoder = GeometryMomentEncoder(args=args, device=device)
         x, lengths = make_synthetic_batch(geom, B=16, device=device)
@@ -191,7 +199,6 @@ class Poly2MomentBuggy(nn.Module):
         self.fusion = args.fusion
         self.moment_encoder = GeometryMomentEncoder(args=args, device=device)
         self.basis_type = args.moment_params.get("basis_type", "monomial")
-        self.moment_norm = args.moment_params.get("moment_norm", "none")
         d_input = 2 * args.d_input if self.fusion in ("learned_fusion", "concat") else args.d_input
         self.nn = SimpleMLP(d_input, args.d_hid, args.d_out, args.dropout)
         self.param_stream1 = nn.Sequential(nn.Linear(args.d_input, args.d_input, bias=False), MLP(args.d_input, args.dropout))
@@ -220,7 +227,7 @@ def test_differential_against_buggy(device):
     print("Test 3 — differential against pre-fix buggy reference")
     print("=" * 78)
 
-    args = make_args("fourier", "m00_scale")
+    args = make_args("fourier")
     failures = []
 
     for geom in ["points", "polylines", "polygons"]:
@@ -272,7 +279,7 @@ def test_real_training_on_failing_task(device, dataset_path: str = "./data/Singa
     from models.GeometryEncoder import GeometryEncoder
     from models.TaskEncoder import TaskEncoder
 
-    args = make_args("fourier", "m00_scale")
+    args = make_args("fourier")
     args.encoder_type = "poly2moment"
     args.dataset_type1 = "polylines"
     args.dataset_type2 = "points"
@@ -348,6 +355,7 @@ def main():
     print(f"using device: {device}  (torch {torch.__version__})")
 
     all_failures = []
+    all_failures += test_only_m00_scale_supported(device)
     all_failures += test_forward_invariants(device)
     all_failures += test_fourier_m00_imag_bounded(device)
     all_failures += test_differential_against_buggy(device)
