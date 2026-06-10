@@ -56,6 +56,8 @@ class Poly2Moment(nn.Module):
 
         moment_params = args.moment_params
         self.basis_type = moment_params.get('basis_type', 'monomial')
+        self.max_order = int(moment_params.get('max_order', 10))
+        self.moment_dim = (self.max_order + 1) ** 2
         moment_norm = moment_params.get('moment_norm', 'm00_scale')
         if moment_norm != 'm00_scale':
             raise ValueError(
@@ -92,7 +94,7 @@ class Poly2Moment(nn.Module):
         # Restore positional/scale info as 3 explicit features:
         #   [log(m00), cx = M10/m00, cy = M01/m00]
         # The streams therefore receive d_input + 3 values instead of d_input.
-        stream_in = args.d_input + self._N_POS_FEATS
+        stream_in = self.moment_dim + self._N_POS_FEATS
 
         # Input dimension setup
         if self.fusion == 'learned_fusion' or self.fusion == 'concat':
@@ -132,10 +134,9 @@ class Poly2Moment(nn.Module):
         return GeometryMomentEncoder(args=basis_args, device=self.device)
 
     def _basis_feature_dim(self, basis_type):
-        moment_dim = self.args.d_input
         if basis_type == "fourier":
-            return 2 * moment_dim + self._N_POS_FEATS
-        return moment_dim + self._N_POS_FEATS
+            return 2 * self.moment_dim + self._N_POS_FEATS
+        return self.moment_dim + self._N_POS_FEATS
 
     def _init_multi_basis_path(self):
         if self.feature_fusion == "projected_concat":

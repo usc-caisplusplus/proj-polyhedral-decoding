@@ -52,15 +52,15 @@ class EncoderSpec:
 _ENCODERS: list[EncoderSpec] = [
     EncoderSpec(
         encoder_id="legendre",
-        moment_params={"basis_type": "legendre", "max_order": 14, "moment_norm": "m00_scale"},
+        moment_params={"basis_type": "legendre", "max_order": 19, "moment_norm": "m00_scale"},
     ),
     EncoderSpec(
         encoder_id="fourier",
-        moment_params={"basis_type": "fourier", "max_order": 14, "moment_norm": "m00_scale"},
+        moment_params={"basis_type": "fourier", "max_order": 19, "moment_norm": "m00_scale"},
     ),
     EncoderSpec(
         encoder_id="monomial",
-        moment_params={"basis_type": "monomial", "max_order": 14, "moment_norm": "m00_scale"},
+        moment_params={"basis_type": "monomial", "max_order": 19, "moment_norm": "m00_scale"},
     ),
     EncoderSpec(
         encoder_id="projected_concat",
@@ -68,7 +68,7 @@ _ENCODERS: list[EncoderSpec] = [
             # basis_type is retained for compatibility with existing logging.
             "basis_type": "fourier",
             "basis_types": ["monomial", "fourier", "legendre"],
-            "max_order": 14,
+            "max_order": 19,
             "moment_norm": "m00_scale",
             "feature_fusion": "projected_concat",
             "projection_dim": 100,
@@ -249,6 +249,7 @@ def _build_run_config(
 
     cfg["encoder_type"] = "poly2moment"
     cfg["moment_params"] = dict(encoder.moment_params)
+    cfg["d_input"] = (int(encoder.moment_params["max_order"]) + 1) ** 2
 
     # This value is used in run names. Multi-basis runs need a distinct label.
     if "basis_types" in encoder.moment_params:
@@ -272,7 +273,12 @@ def _build_run_config(
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Run all tasks × datasets × encoders via config.json rewriting.")
-    p.add_argument("--results_root", type=str, default="./results_v2", help="Clean output root")
+    p.add_argument(
+        "--results_root",
+        type=str,
+        default=None,
+        help="Final output root (default: config.json save_dir)",
+    )
     p.add_argument("--epochs", type=int, default=50, help="Epochs per run (use 1 for quick smoke tests)")
     p.add_argument("--patience", type=int, default=10)
     p.add_argument("--device", type=str, default=None, help='Override config.json device ("cpu" or "cuda")')
@@ -291,7 +297,11 @@ def main() -> None:
     config_path = project_root / "config.json"
     original_config_text = config_path.read_text(encoding="utf-8")
     base_cfg = json.loads(original_config_text)
-    results_root = (project_root / args.results_root).resolve()
+    configured_results_root = args.results_root or base_cfg["save_dir"]
+    results_root = Path(configured_results_root).expanduser()
+    if not results_root.is_absolute():
+        results_root = project_root / results_root
+    results_root = results_root.resolve()
     _ensure_dir(results_root)
 
     datasets: list[tuple[str, Path]] = [
@@ -329,7 +339,7 @@ def main() -> None:
                 patience=int(args.patience),
                 device=args.device,
             )
-            cfg["save_dir"] = str(project_root / "results" / "_staging")
+            cfg["save_dir"] = str(results_root / "_staging")
 
             if args.dry_run:
                 continue
@@ -350,7 +360,7 @@ def main() -> None:
             (dest / "stdout.txt").write_text(out, encoding="utf-8")
 
             # Optional: if staging got recreated, keep it empty-ish.
-            staging = project_root / "results" / "_staging"
+            staging = results_root / "_staging"
             if staging.exists():
                 # do not delete (safety), but we can leave it as-is
                 pass
@@ -359,7 +369,10 @@ def main() -> None:
         config_path.write_text(original_config_text, encoding="utf-8")
 
     print(f"\nDone. Results at: {results_root}")
-    print("Next: python scripts/generate_tables.py --results_dir ./results_v2 --out_dir ./tables_v2")
+    print(
+        f"Next: python scripts/generate_tables.py "
+        f"--results_dir {results_root} --out_dir ./tables_v2"
+    )
 
 
 if __name__ == "__main__":

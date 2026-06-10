@@ -139,6 +139,19 @@ def test_multi_basis_feature_order(device):
     return []
 
 
+def test_dimension_derived_from_max_order(device):
+    args = make_multi_basis_args("projected_concat", max_order=2)
+    args.d_input = 400  # Deliberately stale; max_order is the source of truth.
+    model = Poly2Moment(args, device).to(device)
+
+    expected_moment_dim = 9
+    if model.moment_dim != expected_moment_dim:
+        return [("derived moment dimension", model.moment_dim, expected_moment_dim)]
+    if model.basis_projectors["monomial"][0].in_features != expected_moment_dim + 3:
+        return [("projector dimension was built from stale d_input")]
+    return []
+
+
 def make_synthetic_batch(geom_type: str, B: int, device):
     """Construct a small batch + lengths tensor for the requested geom_type."""
     rng = np.random.default_rng(0)
@@ -429,6 +442,7 @@ def main():
     all_failures += test_only_m00_scale_supported(device)
     all_failures += test_multi_basis_fusion(device)
     all_failures += test_multi_basis_feature_order(device)
+    all_failures += test_dimension_derived_from_max_order(device)
     all_failures += test_forward_invariants(device)
     all_failures += test_fourier_m00_imag_bounded(device)
     all_failures += test_differential_against_buggy(device)
