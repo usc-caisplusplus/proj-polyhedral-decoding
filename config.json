@@ -31,8 +31,11 @@
 
     "moment_params": {
         "basis_type": "fourier",
+        "basis_types": ["monomial", "fourier", "legendre"],
         "max_order": 14,
-        "moment_norm": "m00_scale"
+        "moment_norm": "m00_scale",
+        "feature_fusion": "projected_concat",
+        "projection_dim": 100
     },
 
     "device": "cuda",

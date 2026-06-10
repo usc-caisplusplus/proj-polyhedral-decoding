@@ -1,7 +1,6 @@
 """
-Run *all* dataset tasks on *both* datasets (NewYork, Singapore) for all moment
-families (Legendre / Fourier / Monomial) by repeatedly writing `config.json`
-and invoking `run.py`.
+Run dataset tasks on both datasets (NewYork, Singapore) for the configured
+moment encoders by repeatedly writing `config.json` and invoking `run.py`.
 
 Why this approach:
 - `run.py` always loads `config.json` via `args_parser("config.json")`
@@ -46,7 +45,7 @@ class TaskSpec:
 
 @dataclass(frozen=True)
 class EncoderSpec:
-    encoder_id: str  # legendre | fourier | monomial
+    encoder_id: str  # stable id used in results folders
     moment_params: dict[str, Any]
 
 
@@ -62,6 +61,18 @@ _ENCODERS: list[EncoderSpec] = [
     EncoderSpec(
         encoder_id="monomial",
         moment_params={"basis_type": "monomial", "max_order": 14, "moment_norm": "m00_scale"},
+    ),
+    EncoderSpec(
+        encoder_id="projected_concat",
+        moment_params={
+            # basis_type is retained for compatibility with existing logging.
+            "basis_type": "fourier",
+            "basis_types": ["monomial", "fourier", "legendre"],
+            "max_order": 14,
+            "moment_norm": "m00_scale",
+            "feature_fusion": "projected_concat",
+            "projection_dim": 100,
+        },
     ),
 ]
 
@@ -239,8 +250,15 @@ def _build_run_config(
     cfg["encoder_type"] = "poly2moment"
     cfg["moment_params"] = dict(encoder.moment_params)
 
-    # keep this aligned with moment basis to avoid downstream ambiguity
-    cfg["sampling_strategy"] = str(encoder.moment_params.get("basis_type", cfg.get("sampling_strategy", "fourier")))
+    # This value is used in run names. Multi-basis runs need a distinct label.
+    if "basis_types" in encoder.moment_params:
+        cfg["sampling_strategy"] = encoder.encoder_id
+    else:
+        cfg["sampling_strategy"] = str(
+            encoder.moment_params.get(
+                "basis_type", cfg.get("sampling_strategy", "fourier")
+            )
+        )
 
     cfg["epochs"] = int(epochs)
     cfg["patience"] = int(patience)
@@ -258,6 +276,13 @@ def main() -> None:
     p.add_argument("--epochs", type=int, default=50, help="Epochs per run (use 1 for quick smoke tests)")
     p.add_argument("--patience", type=int, default=10)
     p.add_argument("--device", type=str, default=None, help='Override config.json device ("cpu" or "cuda")')
+    p.add_argument(
+        "--encoders",
+        nargs="+",
+        choices=[encoder.encoder_id for encoder in _ENCODERS],
+        default=None,
+        help="Run only the selected encoders (default: all)",
+    )
     p.add_argument("--max_runs", type=int, default=None, help="Cap total runs (debugging)")
     p.add_argument("--dry_run", action="store_true")
     args = p.parse_args()
@@ -275,10 +300,13 @@ def main() -> None:
     ]
 
     all_plans: list[tuple[str, TaskSpec, EncoderSpec]] = []
+    selected_encoders = set(args.encoders) if args.encoders else None
     for dataset_name, dataset_dir in datasets:
         tasks = discover_tasks(dataset_dir)
         for t in tasks:
             for e in _ENCODERS:
+                if selected_encoders is not None and e.encoder_id not in selected_encoders:
+                    continue
                 all_plans.append((dataset_name, t, e))
 
     if args.max_runs is not None:

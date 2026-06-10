@@ -58,6 +58,16 @@ def make_args(basis_type: str, max_order: int = 14):
     return a
 
 
+def make_multi_basis_args(feature_fusion: str, max_order: int = 4):
+    args = make_args("fourier", max_order=max_order)
+    args.moment_params.update({
+        "basis_types": ["monomial", "fourier", "legendre"],
+        "feature_fusion": feature_fusion,
+        "projection_dim": 12,
+    })
+    return args
+
+
 def test_only_m00_scale_supported(device):
     args = make_args("monomial")
     args.moment_params["moment_norm"] = "none"
@@ -66,6 +76,67 @@ def test_only_m00_scale_supported(device):
     except ValueError as exc:
         return [] if "only supports moment_norm='m00_scale'" in str(exc) else [str(exc)]
     return ["unsupported normalization was accepted"]
+
+
+def test_multi_basis_fusion(device):
+    failures = []
+    x, lengths = make_synthetic_batch("polylines", B=4, device=device)
+
+    for fusion in ["normalized_concat", "projected_concat"]:
+        args = make_multi_basis_args(fusion)
+        torch.manual_seed(0)
+        model = Poly2Moment(args, device).to(device).eval()
+        with torch.no_grad():
+            out = model(x, lengths, dataset_type="polylines")
+
+        if tuple(out.shape) != (4, args.d_out):
+            failures.append((fusion, "shape", tuple(out.shape)))
+        if not torch.isfinite(out).all().item():
+            failures.append((fusion, "non-finite output"))
+
+        first_linear = model.nn.nn[0]
+        if fusion == "projected_concat":
+            expected_dim = 3 * args.moment_params["projection_dim"]
+        else:
+            moment_dim = args.d_input
+            expected_dim = (
+                (moment_dim + model._N_POS_FEATS)
+                + (2 * moment_dim + model._N_POS_FEATS)
+                + (moment_dim + model._N_POS_FEATS)
+            )
+        if first_linear.in_features != expected_dim:
+            failures.append(
+                (fusion, "fused dimension", first_linear.in_features, expected_dim)
+            )
+
+        if fusion == "projected_concat":
+            model.train()
+            model(x, lengths, dataset_type="polylines").sum().backward()
+            for basis, projector in model.basis_projectors.items():
+                if projector[0].weight.grad is None:
+                    failures.append((fusion, basis, "missing projector gradient"))
+
+    return failures
+
+
+def test_multi_basis_feature_order(device):
+    args = make_multi_basis_args("normalized_concat", max_order=1)
+    model = Poly2Moment(args, device).to(device)
+    encoded = torch.tensor(
+        [[[2 + 0j, 4 + 6j], [8 + 10j, 12 + 14j]]],
+        dtype=torch.complex64,
+        device=device,
+    )
+
+    features = model._prepare_basis_features(encoded)
+    expected = torch.tensor(
+        [[1, 2, 4, 6, 0, 3, 5, 7, math.log(2), 4, 2]],
+        dtype=torch.float32,
+        device=device,
+    )
+    if not torch.allclose(features, expected, atol=1e-6):
+        return [("feature order", features.cpu().tolist(), expected.cpu().tolist())]
+    return []
 
 
 def make_synthetic_batch(geom_type: str, B: int, device):
@@ -356,6 +427,8 @@ def main():
 
     all_failures = []
     all_failures += test_only_m00_scale_supported(device)
+    all_failures += test_multi_basis_fusion(device)
+    all_failures += test_multi_basis_feature_order(device)
     all_failures += test_forward_invariants(device)
     all_failures += test_fourier_m00_imag_bounded(device)
     all_failures += test_differential_against_buggy(device)

@@ -1,5 +1,8 @@
+from copy import copy
+
 import torch
 import torch.nn as nn
+
 from models.moment_encoder import GeometryMomentEncoder
 
 
@@ -42,6 +45,8 @@ class Poly2Moment(nn.Module):
     # Number of explicit positional/scale features appended after m00 scaling:
     #   [log(m00), cx = M10/m00, cy = M01/m00]
     _N_POS_FEATS = 3
+    _SUPPORTED_BASES = ("monomial", "fourier", "legendre")
+    _SUPPORTED_FEATURE_FUSIONS = ("normalized_concat", "projected_concat")
 
     def __init__(self, args, device):
         super().__init__()
@@ -49,16 +54,40 @@ class Poly2Moment(nn.Module):
         self.device = device
         self.fusion = args.fusion
 
-        # Initialize the moment encoder
-        self.moment_encoder = GeometryMomentEncoder(args=args, device=self.device)
-
-        # Get basis type for determining if moments are real or complex
-        self.basis_type = args.moment_params.get('basis_type', 'monomial')
-        moment_norm = args.moment_params.get('moment_norm', 'm00_scale')
+        moment_params = args.moment_params
+        self.basis_type = moment_params.get('basis_type', 'monomial')
+        moment_norm = moment_params.get('moment_norm', 'm00_scale')
         if moment_norm != 'm00_scale':
             raise ValueError(
                 f"Poly2Moment only supports moment_norm='m00_scale', got {moment_norm!r}"
             )
+
+        configured_basis_types = moment_params.get('basis_types')
+        self.use_multi_basis = configured_basis_types is not None
+        if self.use_multi_basis:
+            self.basis_types = tuple(configured_basis_types)
+            self._validate_multi_basis_config()
+            self.feature_fusion = moment_params.get(
+                'feature_fusion', 'projected_concat'
+            )
+            if self.feature_fusion not in self._SUPPORTED_FEATURE_FUSIONS:
+                raise ValueError(
+                    f"Unknown feature_fusion {self.feature_fusion!r}; expected one of "
+                    f"{self._SUPPORTED_FEATURE_FUSIONS}"
+                )
+
+            self.moment_encoders = {
+                basis: self._make_moment_encoder(basis)
+                for basis in self.basis_types
+            }
+            # Preserve the public attribute used by existing scripts.
+            self.moment_encoder = self.moment_encoders[self.basis_types[0]]
+            self._init_multi_basis_path()
+            return
+
+        # Legacy single-basis path.
+        self.basis_types = (self.basis_type,)
+        self.moment_encoder = GeometryMomentEncoder(args=args, device=self.device)
 
         # Restore positional/scale info as 3 explicit features:
         #   [log(m00), cx = M10/m00, cy = M01/m00]
@@ -84,6 +113,58 @@ class Poly2Moment(nn.Module):
             MLP(stream_in, dropout=args.dropout)
         )
 
+    def _validate_multi_basis_config(self):
+        if not self.basis_types:
+            raise ValueError("moment_params.basis_types must not be empty")
+        if len(set(self.basis_types)) != len(self.basis_types):
+            raise ValueError("moment_params.basis_types must not contain duplicates")
+        unknown = set(self.basis_types) - set(self._SUPPORTED_BASES)
+        if unknown:
+            raise ValueError(
+                f"Unsupported basis types: {sorted(unknown)}; expected values from "
+                f"{self._SUPPORTED_BASES}"
+            )
+
+    def _make_moment_encoder(self, basis_type):
+        basis_args = copy(self.args)
+        basis_args.moment_params = dict(self.args.moment_params)
+        basis_args.moment_params["basis_type"] = basis_type
+        return GeometryMomentEncoder(args=basis_args, device=self.device)
+
+    def _basis_feature_dim(self, basis_type):
+        moment_dim = self.args.d_input
+        if basis_type == "fourier":
+            return 2 * moment_dim + self._N_POS_FEATS
+        return moment_dim + self._N_POS_FEATS
+
+    def _init_multi_basis_path(self):
+        if self.feature_fusion == "projected_concat":
+            projection_dim = self.args.moment_params.get(
+                "projection_dim", self.args.d_hid
+            )
+            if not isinstance(projection_dim, int) or projection_dim <= 0:
+                raise ValueError("moment_params.projection_dim must be a positive integer")
+            self.projection_dim = projection_dim
+            self.basis_projectors = nn.ModuleDict({
+                basis: nn.Sequential(
+                    nn.Linear(self._basis_feature_dim(basis), projection_dim),
+                    nn.ReLU(),
+                    nn.Dropout(self.args.dropout),
+                    nn.Linear(projection_dim, projection_dim),
+                )
+                for basis in self.basis_types
+            })
+            fused_dim = len(self.basis_types) * projection_dim
+        else:
+            self.basis_projectors = nn.ModuleDict()
+            fused_dim = sum(
+                self._basis_feature_dim(basis) for basis in self.basis_types
+            )
+
+        self.nn = SimpleMLP(
+            fused_dim, self.args.d_hid, self.args.d_out, self.args.dropout
+        )
+
     def _m00_scale(self, x, m00=None):
         """
         Divide a flat moment vector by |m00| and return scale/position features.
@@ -102,6 +183,35 @@ class Poly2Moment(nn.Module):
         pos_feats = torch.stack([log_m00.squeeze(1), cx, cy], dim=1)
         return x / m00, pos_feats
 
+    def _prepare_basis_features(self, x_encoded):
+        """Normalize one basis tensor and flatten it into one feature group."""
+        batch_size = x_encoded.shape[0]
+        x_flat = x_encoded.reshape(batch_size, -1)
+
+        if torch.is_complex(x_flat):
+            m00 = x_flat[:, 0:1].abs().to(torch.float32).clamp(min=1e-6)
+            real_norm, pos_feats = self._m00_scale(
+                x_flat.real.to(torch.float32), m00=m00
+            )
+            imag_norm = x_flat.imag.to(torch.float32) / m00
+            return torch.cat([real_norm, imag_norm, pos_feats], dim=1)
+
+        normalized, pos_feats = self._m00_scale(x_flat.to(torch.float32))
+        return torch.cat([normalized, pos_feats], dim=1)
+
+    def _forward_multi_basis(self, x, lengths, dataset_type):
+        basis_features = []
+        for basis in self.basis_types:
+            encoded = self.moment_encoders[basis].encode(
+                x, lengths, dataset_type=dataset_type
+            )
+            features = self._prepare_basis_features(encoded)
+            if self.feature_fusion == "projected_concat":
+                features = self.basis_projectors[basis](features)
+            basis_features.append(features)
+
+        return self.nn(torch.cat(basis_features, dim=1))
+
     def forward(self, x, lengths, dataset_type):
         """
         Forward pass through the Poly2Moment model.
@@ -114,6 +224,9 @@ class Poly2Moment(nn.Module):
         Returns:
             x_emb: Fixed-length embedding vector
         """
+        if self.use_multi_basis:
+            return self._forward_multi_basis(x, lengths, dataset_type)
+
         B = x.shape[0]
 
         # Encode geometry using moment basis
