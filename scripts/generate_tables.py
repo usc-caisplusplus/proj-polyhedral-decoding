@@ -18,11 +18,13 @@ import pandas as pd
 
 CITY_DISPLAY = {"Singapore": "Singapore", "NewYork": "New York"}
 
-METHOD_ORDER = ["LEGENDRE", "FOURIER", "MONOMIAL"]
+ALL_MOMENTS_CONCAT = "ALL_MOMENTS_CONCAT"
+METHOD_ORDER = ["LEGENDRE", "FOURIER", "MONOMIAL", ALL_MOMENTS_CONCAT]
 METHOD_DISPLAY = {
     "LEGENDRE": "Legendre moments",
     "FOURIER": "Fourier moments",
     "MONOMIAL": "Monomial (geometric moments)",
+    ALL_MOMENTS_CONCAT: "All moments (concatenated)",
 }
 
 
@@ -62,6 +64,14 @@ def _method_name(args: dict[str, Any]) -> str:
     mp = args.get("moment_params") or {}
     if not isinstance(mp, dict):
         mp = {}
+
+    basis_types = mp.get("basis_types")
+    if (
+        isinstance(basis_types, (list, tuple))
+        and len(basis_types) > 1
+    ):
+        return ALL_MOMENTS_CONCAT
+
     bt = str(mp.get("basis_type", "") or "")
     if bt == "legendre":
         return "LEGENDRE"
@@ -96,6 +106,11 @@ def collect_metrics_df(results_dir: Path) -> pd.DataFrame:
                 "task": a.get("task"),
                 "method": _method_name(a),
                 "basis_type": mp.get("basis_type"),
+                "basis_types": json.dumps(mp.get("basis_types"))
+                if mp.get("basis_types") is not None
+                else None,
+                "feature_fusion": mp.get("feature_fusion"),
+                "projection_dim": mp.get("projection_dim"),
                 "max_order": mp.get("max_order"),
                 "epochs": a.get("epochs"),
                 **m,
