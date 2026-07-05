@@ -312,6 +312,36 @@ def test_polygon_area_m0n0(tables, basis):
                                     err_msg=f"polygon {basis} area idx={b} mismatch")
 
 
+@pytest.mark.parametrize('basis', ['monomial', 'fourier', 'legendre'])
+def test_polygon_with_hole(tables, basis):
+    """NaN-separated rings close independently and holes are subtracted."""
+    exterior = np.array([
+        [-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0],
+    ])
+    hole = np.array([
+        [-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5],
+    ])
+    vertices = np.concatenate(
+        [exterior, np.array([[np.nan, np.nan]]), hole],
+        axis=0,
+    )
+    polygons = vertices[None, :, :]
+    lengths = np.array([len(vertices)])
+    signs = np.concatenate([
+        np.ones(len(exterior)), np.zeros(1), -np.ones(len(hole))
+    ])[None, :]
+    fn = {'monomial': batch_moments_polygons_monomial,
+          'fourier':  batch_moments_polygons_fourier,
+          'legendre': batch_moments_polygons_legendre}[basis]
+
+    got = fn(polygons, lengths, tables, signs=signs)[0]
+    expected = (
+        _scalar_polygon_grid(exterior, basis)
+        - _scalar_polygon_grid(hole, basis)
+    )
+    np.testing.assert_allclose(got, expected, atol=1e-8, rtol=0)
+
+
 # ---------------------------------------------------------------------------
 # 5. Numerical sanity checks (independent of scalar reference)
 # ---------------------------------------------------------------------------
@@ -396,6 +426,9 @@ if __name__ == '__main__':
         lambda: test_polygon_area_m0n0(tables_, 'monomial'),
         lambda: test_polygon_area_m0n0(tables_, 'fourier'),
         lambda: test_polygon_area_m0n0(tables_, 'legendre'),
+        lambda: test_polygon_with_hole(tables_, 'monomial'),
+        lambda: test_polygon_with_hole(tables_, 'fourier'),
+        lambda: test_polygon_with_hole(tables_, 'legendre'),
         # sanity
         lambda: test_point_monomial_known(tables_),
         lambda: test_point_fourier_m0n0(tables_),

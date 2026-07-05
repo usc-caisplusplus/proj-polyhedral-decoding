@@ -99,18 +99,49 @@ class GeometryMomentEncoder():
 
         Layout:  [ext_verts..., NaN, hole0_verts..., NaN, hole1_verts..., ...]
         """
-        polygon = Polygon(polygon_coords)
+        polygon_coords = np.asarray(polygon_coords, dtype=np.float64)
+        separator_indices = np.flatnonzero(np.isnan(polygon_coords).any(axis=1))
+        if separator_indices.size:
+            rings = []
+            start = 0
+            for stop in separator_indices:
+                if stop - start >= 3:
+                    rings.append(polygon_coords[start:stop])
+                start = stop + 1
+            if len(polygon_coords) - start >= 3:
+                rings.append(polygon_coords[start:])
+            if not rings:
+                raise ValueError("Polygon input contains no valid rings")
+            polygon = Polygon(rings[0], holes=rings[1:])
+        else:
+            polygon = Polygon(polygon_coords)
+
         fixed_polygon = polygon.buffer(0)
 
         # Handle MultiPolygon produced by buffer(0) — take the largest piece
         if fixed_polygon.geom_type == 'MultiPolygon':
             fixed_polygon = max(fixed_polygon.geoms, key=lambda g: g.area)
+        if fixed_polygon.is_empty or fixed_polygon.geom_type != 'Polygon':
+            raise ValueError("Polygon could not be repaired")
 
-        exterior_coords = np.array(list(fixed_polygon.exterior.coords)[:-1])
+        def counterclockwise(coords):
+            coords = np.asarray(coords, dtype=np.float64)
+            x = coords[:, 0]
+            y = coords[:, 1]
+            signed_area_twice = np.sum(x * np.roll(y, -1) - np.roll(x, -1) * y)
+            return coords if signed_area_twice >= 0 else coords[::-1].copy()
+
+        # The vectorized routines explicitly subtract hole rings, so all rings
+        # must use the same orientation.
+        exterior_coords = counterclockwise(
+            np.array(list(fixed_polygon.exterior.coords)[:-1])
+        )
         rings = [exterior_coords]
 
         for interior in fixed_polygon.interiors:
-            hole_coords = np.array(list(interior.coords)[:-1])
+            hole_coords = counterclockwise(
+                np.array(list(interior.coords)[:-1])
+            )
             rings.append(np.array([[np.nan, np.nan]]))
             rings.append(hole_coords)
 

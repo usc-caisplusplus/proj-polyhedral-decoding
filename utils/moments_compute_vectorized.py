@@ -481,19 +481,20 @@ def batch_moments_polygons_monomial(
         V = polygons[b, :K]           # (K, 2)
         S = signs[b, :K] if hole_aware else np.ones(K)  # (K,)
 
-        # Build edges, skipping any vertex that is a NaN sentinel or whose
-        # sign is 0 (sentinel), and also skipping edges that would cross a
-        # ring boundary (i.e. where the next vertex is a sentinel).
+        ring_start = 0
         for k in range(K):
             if hole_aware and S[k] == 0.0:
-                continue  # skip the NaN sentinel vertex itself
-            k_next = (k + 1) % K
-            # Skip edge if next vertex is a sentinel or a different ring
-            if hole_aware and S[k_next] == 0.0:
+                ring_start = k + 1
                 continue
-            # Skip closing edge that would jump from one ring to another
-            if hole_aware and S[k] != S[k_next] and k_next != 0:
-                continue
+            if hole_aware:
+                has_next_in_ring = (
+                    k + 1 < K
+                    and S[k + 1] != 0.0
+                    and S[k + 1] == S[k]
+                )
+                k_next = k + 1 if has_next_in_ring else ring_start
+            else:
+                k_next = (k + 1) % K
             ax_val, ay_val = V[k, 0], V[k, 1]
             bx_val, by_val = V[k_next, 0], V[k_next, 1]
             if np.isnan(ax_val) or np.isnan(bx_val):
@@ -559,14 +560,20 @@ def batch_moments_polygons_fourier(
         V = polygons[b, :K]
         S = signs[b, :K] if hole_aware else np.ones(K)
 
+        ring_start = 0
         for k in range(K):
             if hole_aware and S[k] == 0.0:
+                ring_start = k + 1
                 continue
-            k_next = (k + 1) % K
-            if hole_aware and S[k_next] == 0.0:
-                continue
-            if hole_aware and S[k] != S[k_next] and k_next != 0:
-                continue
+            if hole_aware:
+                has_next_in_ring = (
+                    k + 1 < K
+                    and S[k + 1] != 0.0
+                    and S[k + 1] == S[k]
+                )
+                k_next = k + 1 if has_next_in_ring else ring_start
+            else:
+                k_next = (k + 1) % K
             ax_val, ay_val = V[k, 0], V[k, 1]
             bx_val, by_val = V[k_next, 0], V[k_next, 1]
             if np.isnan(ax_val) or np.isnan(bx_val):

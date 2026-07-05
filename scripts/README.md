@@ -54,6 +54,24 @@ Pair `.pt` files already use one shared city-wide `[-1, 1]` frame, so the
 evaluator defaults to `--coordinate-mode pre_normalized`; do not fit new bounds
 separately for each pair dataset when evaluating direction.
 
+Convert a valid Geo2Vec entity GeoPackage into the five-tensor distance format
+used by `run.py`:
+
+```bash
+python scripts/convert_geo2vec_distance.py \
+  --input Geo2Vec/data/NYC_total_data.gpkg \
+  --output data/Geo2VecNYC/point_polygon_dis_data.pt \
+  --type1 point --type2 polygon --num-pairs 50000 --seed 2024
+```
+
+The converter normalizes the complete source layer once, computes distances in
+that shared frame, and writes deterministic 60/20/20 indices beside the data as
+`point_polygon_dis_data_splits.pt`. Multipart geometries are reduced to their
+largest component and polygon holes are removed because the current
+Poly2Moment pair tensor represents one coordinate sequence per entity. Some
+Geo2Vec artifacts have a `.gpkg` suffix but contain model weights; the
+converter detects and rejects those files.
+
 **GPU note:** If PyTorch prints *“no kernel image is available for execution on the device”* (e.g. very new NVIDIA architectures), install a PyTorch build that matches your GPU, or run with `--device cpu` until then.
 
 Training entry point remains **`run.py`** at the repo root.
