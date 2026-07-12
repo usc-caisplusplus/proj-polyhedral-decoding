@@ -645,13 +645,22 @@ def metadata_digest(metadata: dict[str, Any]) -> str:
     return hashlib.sha256(payload).hexdigest()[:12]
 
 
+def torch_load_compat(path: Path) -> Any:
+    try:
+        return torch.load(path, map_location="cpu", weights_only=True)
+    except TypeError as exc:
+        if "weights_only" not in str(exc):
+            raise
+        return torch.load(path, map_location="cpu")
+
+
 def main() -> None:
     args = parse_args()
     resolve_profile(args)
     set_seed(args.seed)
 
     data_file = args.data_file.expanduser().resolve()
-    raw = torch.load(data_file, map_location="cpu", weights_only=True)
+    raw = torch_load_compat(data_file)
     if not isinstance(raw, (tuple, list)) or len(raw) != 5:
         raise ValueError("Expected a 2D pair dataset containing (X1, X2, L1, L2, Y)")
     x1, x2, l1, l2, labels = raw
@@ -673,7 +682,7 @@ def main() -> None:
     cache_path = args.embedding_cache.expanduser().resolve()
 
     if cache_path.exists() and not args.rebuild_embeddings:
-        cached = torch.load(cache_path, map_location="cpu", weights_only=True)
+        cached = torch_load_compat(cache_path)
         if cached.get("metadata") != metadata:
             raise ValueError(
                 f"Embedding cache metadata does not match this run: {cache_path}. "
