@@ -53,7 +53,6 @@ from models.Geo2Vec import (  # noqa: E402
     Geo2Vec_Dataset,
     Geo2Vec_Model,
     SDFLoss,
-    identity_collate,
 )
 from utils.preprocess import normalize_geometries, poly_preprocess  # noqa: E402
 
@@ -287,6 +286,37 @@ def prepare_location_geometries(
     raise ValueError(f"Unsupported coordinate mode: {coordinate_mode}")
 
 
+def sdf_collate(batch: Any) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    if (
+        isinstance(batch, tuple)
+        and len(batch) == 3
+        and all(torch.is_tensor(item) for item in batch)
+    ):
+        return batch
+
+    if isinstance(batch, list) and len(batch) == 3 and all(
+        torch.is_tensor(item) for item in batch
+    ):
+        return batch[0], batch[1], batch[2]
+
+    if not isinstance(batch, list) or not batch:
+        raise TypeError(f"Unexpected Geo2Vec batch type: {type(batch)!r}")
+
+    try:
+        entity_ids, coordinates, distances = zip(*batch)
+    except ValueError as exc:
+        raise ValueError(
+            "Expected Geo2Vec batches to contain triples of "
+            "(entity_id, coordinate, distance)"
+        ) from exc
+
+    return (
+        torch.stack(tuple(entity_ids)),
+        torch.stack(tuple(coordinates)),
+        torch.stack(tuple(distances)),
+    )
+
+
 def train_sdf_embeddings(
     geometries: list[Any],
     args: argparse.Namespace,
@@ -331,7 +361,7 @@ def train_sdf_embeddings(
         "batch_size": args.sdf_batch_size,
         "num_workers": 0,
         "pin_memory": device.type == "cuda",
-        "collate_fn": identity_collate,
+        "collate_fn": sdf_collate,
     }
     train_loader = DataLoader(train_dataset, shuffle=True, **loader_kwargs)
     val_loader = DataLoader(val_dataset, shuffle=False, **loader_kwargs)
