@@ -1,14 +1,15 @@
 """
-Evaluate Poly2Moment on Geo2Vec's Building and MNIST shape classification tasks.
+Evaluate Poly2Moment on Geo2Vec's shape classification and edge-count tasks.
 
 The source polygons are centered and scaled independently, matching Geo2Vec's
 shape preprocessing. Deterministic moment features are computed once and may be
 cached; Poly2Moment's learned fusion/projection layers and the downstream MLP
-classifier are then trained jointly.
+predictor are then trained jointly.
 
 Examples:
     python scripts/evaluate_poly2moment_shape_classification.py --dataset building
-    python scripts/evaluate_poly2moment_shape_classification.py --dataset mnist
+    python scripts/evaluate_poly2moment_shape_classification.py \
+        --task edge-count --dataset mnist
     python scripts/evaluate_poly2moment_shape_classification.py --dataset both
     python scripts/evaluate_poly2moment_shape_classification.py \
         --dataset building --max-samples-per-class 20 --epochs 2
@@ -20,6 +21,7 @@ import argparse
 import copy
 import hashlib
 import json
+import pickle
 import random
 import sys
 from dataclasses import dataclass
@@ -33,7 +35,10 @@ from sklearn.metrics import (
     accuracy_score,
     confusion_matrix,
     f1_score,
+    mean_absolute_error,
+    mean_squared_error,
     precision_score,
+    r2_score,
     recall_score,
 )
 from sklearn.model_selection import train_test_split
@@ -50,6 +55,8 @@ from models.poly2moment import Poly2Moment  # noqa: E402
 DATASET_PATHS = {
     "building": ROOT / "Geo2Vec" / "data" / "ShapeClassification.gpkg",
     "mnist": ROOT / "Geo2Vec" / "data" / "mnist_scaled_normalized.gpkg",
+    "singapore": ROOT / "Geo2Vec" / "data" / "Singapore_total_data.gpkg",
+    "nyc": ROOT / "Geo2Vec" / "data" / "NYC_total_data.gpkg",
 }
 
 
@@ -61,6 +68,7 @@ class ShapeRecords:
     source_indices: list[int]
     skipped: int
     polygons_with_holes: int
+    multipolygons_reduced: int
 
 
 class CoordinateDataset(Dataset):
@@ -75,13 +83,13 @@ class CoordinateDataset(Dataset):
         return self.coordinates[index], self.labels[index]
 
 
-class Poly2MomentFeatureClassifier(nn.Module):
+class Poly2MomentFeaturePredictor(nn.Module):
     """Trainable Poly2Moment head operating on cached deterministic features."""
 
     def __init__(
         self,
         encoder: Poly2Moment,
-        num_classes: int,
+        output_size: int,
         classifier_hidden_size: int,
         classifier_dropout: float,
     ):
@@ -94,7 +102,7 @@ class Poly2MomentFeatureClassifier(nn.Module):
             nn.Linear(classifier_hidden_size, classifier_hidden_size),
             nn.ReLU(),
             nn.Dropout(classifier_dropout),
-            nn.Linear(classifier_hidden_size, num_classes),
+            nn.Linear(classifier_hidden_size, output_size),
         )
 
     def forward(self, fixed_features: torch.Tensor) -> torch.Tensor:
@@ -126,13 +134,18 @@ class Poly2MomentFeatureClassifier(nn.Module):
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Evaluate Poly2Moment on Geo2Vec's single-polygon Building and "
-            "MNIST shape classification datasets."
+            "Evaluate Poly2Moment on Geo2Vec's polygon shape classification "
+            "or edge-count regression tasks."
         )
     )
     parser.add_argument(
+        "--task",
+        choices=("classification", "edge-count"),
+        default="classification",
+    )
+    parser.add_argument(
         "--dataset",
-        choices=("building", "mnist", "both"),
+        choices=("building", "mnist", "singapore", "nyc", "both", "all"),
         default="both",
     )
     parser.add_argument(
@@ -145,12 +158,28 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DATASET_PATHS["mnist"],
     )
+    parser.add_argument(
+        "--singapore-file",
+        type=Path,
+        default=DATASET_PATHS["singapore"],
+    )
+    parser.add_argument(
+        "--nyc-file",
+        type=Path,
+        default=DATASET_PATHS["nyc"],
+    )
     parser.add_argument("--config", type=Path, default=ROOT / "config.json")
     parser.add_argument(
         "--max-samples-per-class",
         type=int,
         default=None,
         help="Optional stratified subset, useful for smoke tests",
+    )
+    parser.add_argument(
+        "--max-samples",
+        type=int,
+        default=None,
+        help="Optional random subset for edge-count regression",
     )
     parser.add_argument("--seed", type=int, default=2024)
     parser.add_argument(
@@ -190,7 +219,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=ROOT / "results" / "poly2moment_shape_classification.json",
+        default=None,
     )
     return parser.parse_args()
 
@@ -246,7 +275,9 @@ def label_sort_key(label: str) -> tuple[int, int | str]:
         return (1, label)
 
 
-def normalized_polygon_coordinates(geometry: Any) -> tuple[np.ndarray, int] | None:
+def normalized_polygon_coordinates(
+    geometry: Any,
+) -> tuple[np.ndarray, int, int, bool] | None:
     from shapely import affinity
     from shapely.geometry import MultiPolygon, Polygon
 
@@ -254,6 +285,7 @@ def normalized_polygon_coordinates(geometry: Any) -> tuple[np.ndarray, int] | No
         return None
     if not geometry.is_valid:
         geometry = geometry.buffer(0)
+    multipolygon_reduced = isinstance(geometry, MultiPolygon)
     if isinstance(geometry, MultiPolygon):
         geometry = max(geometry.geoms, key=lambda part: part.area)
     if not isinstance(geometry, Polygon) or geometry.is_empty or geometry.area <= 0:
@@ -280,50 +312,102 @@ def normalized_polygon_coordinates(geometry: Any) -> tuple[np.ndarray, int] | No
     coordinates = np.concatenate(rings, axis=0)
     if len(coordinates) < 3:
         return None
-    return coordinates, len(geometry.interiors)
+    edge_count = len(geometry.exterior.coords) - 1
+    edge_count += sum(len(interior.coords) - 1 for interior in geometry.interiors)
+    return (
+        coordinates,
+        len(geometry.interiors),
+        edge_count,
+        multipolygon_reduced,
+    )
+
+
+def read_geometry_rows(path: Path) -> list[tuple[int, Any, Any]]:
+    """Read (source index, geometry, optional class label) records."""
+    if not path.is_file():
+        raise FileNotFoundError(f"Shape dataset not found: {path}")
+
+    with path.open("rb") as file:
+        magic = file.read(16)
+    if magic.startswith(b"SQLite format 3"):
+        try:
+            import geopandas as gpd
+        except ImportError as error:
+            raise RuntimeError(
+                "GeoPandas is required. Install dependencies with "
+                "`pip install -r requirements.txt`."
+            ) from error
+        frame = gpd.read_file(path)
+        has_labels = "label" in frame
+        return [
+            (
+                position,
+                row.geometry,
+                row["label"] if has_labels else None,
+            )
+            for position, (_, row) in enumerate(frame.iterrows())
+        ]
+
+    if path.suffix.lower() in {".pkl", ".pickle"}:
+        with path.open("rb") as file:
+            data = pickle.load(file)
+        rows = []
+        for position, item in enumerate(data):
+            if isinstance(item, dict):
+                geometry = item.get("shape", item.get("geometry"))
+                label = item.get("label")
+            else:
+                geometry = item
+                label = None
+            rows.append((position, geometry, label))
+        return rows
+
+    if magic.startswith(b"PK"):
+        raise ValueError(
+            f"{path} is a ZIP-based PyTorch checkpoint, not a geometry "
+            "GeoPackage. Supply the original .gpkg or .pkl dataset."
+        )
+    raise ValueError(f"Unsupported geometry dataset format: {path}")
 
 
 def load_shape_records(
     path: Path,
+    task: str,
     max_samples_per_class: int | None,
+    max_samples: int | None,
     seed: int,
 ) -> ShapeRecords:
-    try:
-        import geopandas as gpd
-    except ImportError as error:
-        raise RuntimeError(
-            "GeoPandas is required. Install dependencies with "
-            "`pip install -r requirements.txt`."
-        ) from error
-
-    if not path.is_file():
-        raise FileNotFoundError(f"Shape dataset not found: {path}")
-    frame = gpd.read_file(path)
-    if "label" not in frame:
-        raise ValueError(f"{path} has no 'label' column")
-
-    valid: list[tuple[int, str, np.ndarray, int]] = []
+    valid: list[tuple[int, str | None, np.ndarray, int, int, bool]] = []
     skipped = 0
-    for source_index, row in frame.iterrows():
-        result = normalized_polygon_coordinates(row.geometry)
-        label = row["label"]
+    for source_index, geometry, label in read_geometry_rows(path):
+        result = normalized_polygon_coordinates(geometry)
         label_is_missing = label is None or (
             isinstance(label, (float, np.floating)) and np.isnan(label)
         )
-        if result is None or label_is_missing:
+        if result is None or (task == "classification" and label_is_missing):
             skipped += 1
             continue
-        coordinates, hole_count = result
-        valid.append((int(source_index), str(label), coordinates, hole_count))
+        coordinates, hole_count, edge_count, multipolygon_reduced = result
+        valid.append(
+            (
+                source_index,
+                str(label) if task == "classification" else None,
+                coordinates,
+                hole_count,
+                edge_count,
+                multipolygon_reduced,
+            )
+        )
     if not valid:
-        raise ValueError(f"No valid labeled polygons found in {path}")
+        raise ValueError(f"No valid polygons found in {path}")
 
-    if max_samples_per_class is not None:
+    if task == "classification" and max_samples_per_class is not None:
         if max_samples_per_class < 10:
             raise ValueError("--max-samples-per-class must be at least 10")
         rng = np.random.default_rng(seed)
         grouped: dict[str, list[int]] = {}
-        for position, (_, label, _, _) in enumerate(valid):
+        for position, (_, label, _, _, _, _) in enumerate(valid):
+            assert label is not None
             grouped.setdefault(label, []).append(position)
         selected_positions = []
         for positions in grouped.values():
@@ -338,18 +422,41 @@ def load_shape_records(
         selected_positions.sort()
         valid = [valid[position] for position in selected_positions]
 
-    label_names = sorted({item[1] for item in valid}, key=label_sort_key)
-    label_to_id = {label: index for index, label in enumerate(label_names)}
-    return ShapeRecords(
-        coordinates=[item[2] for item in valid],
-        labels=torch.tensor(
+    if task == "edge-count" and max_samples is not None:
+        if max_samples < 10:
+            raise ValueError("--max-samples must be at least 10")
+        if len(valid) > max_samples:
+            rng = np.random.default_rng(seed)
+            selected_positions = np.sort(
+                rng.choice(len(valid), size=max_samples, replace=False)
+            )
+            valid = [valid[position] for position in selected_positions]
+
+    if task == "classification":
+        label_names = sorted(
+            {item[1] for item in valid if item[1] is not None},
+            key=label_sort_key,
+        )
+        label_to_id = {label: index for index, label in enumerate(label_names)}
+        labels = torch.tensor(
             [label_to_id[item[1]] for item in valid],
             dtype=torch.long,
-        ),
+        )
+    else:
+        label_names = []
+        labels = torch.tensor(
+            [item[4] for item in valid],
+            dtype=torch.float32,
+        )
+
+    return ShapeRecords(
+        coordinates=[item[2] for item in valid],
+        labels=labels,
         label_names=label_names,
         source_indices=[item[0] for item in valid],
         skipped=skipped,
         polygons_with_holes=sum(item[3] > 0 for item in valid),
+        multipolygons_reduced=sum(item[5] for item in valid),
     )
 
 
@@ -421,14 +528,14 @@ def feature_metadata(
         np.asarray(records.source_indices, dtype=np.int64).tobytes()
     ).hexdigest()
     return {
-        "format_version": 1,
+        "format_version": 2,
         "normalization": "per_geometry_bbox_center_max_extent_v1",
+        "multipolygon_policy": "largest_component",
         "dataset": dataset_name,
         "data_file": str(path.resolve()),
         "data_size": stat.st_size,
         "data_mtime_ns": stat.st_mtime_ns,
         "selected_indices_sha256": selected_hash,
-        "labels": records.label_names,
         "moment_params": model_args.moment_params,
         "fusion": model_args.fusion,
     }
@@ -490,20 +597,25 @@ def load_or_compute_features(
     return features
 
 
-def split_indices(labels: torch.Tensor, seed: int) -> dict[str, torch.Tensor]:
+def split_indices(
+    labels: torch.Tensor,
+    seed: int,
+    task: str,
+) -> dict[str, torch.Tensor]:
     indices = np.arange(len(labels))
     targets = labels.numpy()
+    stratify = targets if task == "classification" else None
     train, other = train_test_split(
         indices,
         test_size=0.30,
         random_state=seed,
-        stratify=targets,
+        stratify=stratify,
     )
     validation, test = train_test_split(
         other,
         test_size=0.50,
         random_state=seed,
-        stratify=targets[other],
+        stratify=targets[other] if task == "classification" else None,
     )
     return {
         "train": torch.from_numpy(train),
@@ -520,6 +632,7 @@ def evaluate(
     indices: torch.Tensor,
     device: torch.device,
     batch_size: int,
+    task: str,
 ) -> dict[str, Any]:
     loader = DataLoader(
         TensorDataset(features[indices], labels[indices]),
@@ -530,31 +643,59 @@ def evaluate(
     predictions = []
     truth = []
     loss_sum = 0.0
-    criterion = nn.CrossEntropyLoss(reduction="sum")
+    criterion: nn.Module
+    if task == "classification":
+        criterion = nn.CrossEntropyLoss(reduction="sum")
+    else:
+        criterion = nn.L1Loss(reduction="sum")
     for batch_features, batch_labels in loader:
         batch_features = batch_features.to(device)
         batch_labels = batch_labels.to(device)
-        logits = model(batch_features)
-        loss_sum += criterion(logits, batch_labels).item()
-        predictions.append(logits.argmax(dim=1).cpu())
+        output = model(batch_features)
+        if task == "classification":
+            loss_sum += criterion(output, batch_labels).item()
+            predictions.append(output.argmax(dim=1).cpu())
+        else:
+            output = output.squeeze(-1)
+            batch_labels = batch_labels.float()
+            loss_sum += criterion(output, batch_labels).item()
+            predictions.append(output.cpu())
         truth.append(batch_labels.cpu())
     predicted = torch.cat(predictions).numpy()
     actual = torch.cat(truth).numpy()
+    loss = loss_sum / len(actual)
+    if task == "classification":
+        return {
+            "loss": loss,
+            "accuracy": float(accuracy_score(actual, predicted)),
+            "macro_f1": float(f1_score(actual, predicted, average="macro")),
+            "macro_precision": float(
+                precision_score(
+                    actual,
+                    predicted,
+                    average="macro",
+                    zero_division=0,
+                )
+            ),
+            "macro_recall": float(
+                recall_score(
+                    actual,
+                    predicted,
+                    average="macro",
+                    zero_division=0,
+                )
+            ),
+            "confusion_matrix": confusion_matrix(actual, predicted).tolist(),
+        }
     return {
-        "loss": loss_sum / len(actual),
-        "accuracy": float(accuracy_score(actual, predicted)),
-        "macro_f1": float(f1_score(actual, predicted, average="macro")),
-        "macro_precision": float(
-            precision_score(actual, predicted, average="macro", zero_division=0)
-        ),
-        "macro_recall": float(
-            recall_score(actual, predicted, average="macro", zero_division=0)
-        ),
-        "confusion_matrix": confusion_matrix(actual, predicted).tolist(),
+        "loss": loss,
+        "mae": float(mean_absolute_error(actual, predicted)),
+        "rmse": float(np.sqrt(mean_squared_error(actual, predicted))),
+        "r2": float(r2_score(actual, predicted)),
     }
 
 
-def train_classifier(
+def train_predictor(
     encoder: Poly2Moment,
     features: torch.Tensor,
     labels: torch.Tensor,
@@ -563,16 +704,16 @@ def train_classifier(
     device: torch.device,
 ) -> tuple[dict[str, Any], dict[str, int], int]:
     set_seed(cli.seed + 1)
-    splits = split_indices(labels, cli.seed)
+    splits = split_indices(labels, cli.seed, cli.task)
     train_loader = DataLoader(
         TensorDataset(features[splits["train"]], labels[splits["train"]]),
         batch_size=cli.classifier_batch_size,
         shuffle=True,
         generator=torch.Generator().manual_seed(cli.seed),
     )
-    model = Poly2MomentFeatureClassifier(
+    model = Poly2MomentFeaturePredictor(
         encoder=encoder,
-        num_classes=len(label_names),
+        output_size=len(label_names) if cli.task == "classification" else 1,
         classifier_hidden_size=cli.classifier_hidden_size,
         classifier_dropout=cli.classifier_dropout,
     ).to(device)
@@ -581,7 +722,11 @@ def train_classifier(
         lr=cli.learning_rate,
         weight_decay=cli.weight_decay,
     )
-    criterion = nn.CrossEntropyLoss()
+    criterion: nn.Module
+    if cli.task == "classification":
+        criterion = nn.CrossEntropyLoss()
+    else:
+        criterion = nn.L1Loss()
 
     best_validation_loss = float("inf")
     best_state: dict[str, torch.Tensor] | None = None
@@ -594,7 +739,11 @@ def train_classifier(
             batch_features = batch_features.to(device)
             batch_labels = batch_labels.to(device)
             optimizer.zero_grad()
-            loss = criterion(model(batch_features), batch_labels)
+            output = model(batch_features)
+            if cli.task == "classification":
+                loss = criterion(output, batch_labels)
+            else:
+                loss = criterion(output.squeeze(-1), batch_labels.float())
             loss.backward()
             optimizer.step()
 
@@ -605,6 +754,7 @@ def train_classifier(
             splits["validation"],
             device,
             cli.classifier_batch_size,
+            cli.task,
         )
         if validation["loss"] < best_validation_loss:
             best_validation_loss = validation["loss"]
@@ -614,10 +764,13 @@ def train_classifier(
             stale_epochs += 1
 
         if epoch == 1 or epoch % 10 == 0:
+            metric_name = (
+                "accuracy" if cli.task == "classification" else "mae"
+            )
             print(
                 f"epoch {epoch}/{cli.epochs}: "
                 f"validation_loss={validation['loss']:.6f}, "
-                f"validation_accuracy={validation['accuracy']:.4f}"
+                f"validation_{metric_name}={validation[metric_name]:.4f}"
             )
         if stale_epochs >= cli.patience:
             print(f"Stopped early at epoch {epoch}")
@@ -634,6 +787,7 @@ def train_classifier(
             indices,
             device,
             cli.classifier_batch_size,
+            cli.task,
         )
         for split, indices in splits.items()
     }
@@ -645,8 +799,15 @@ def selected_datasets(cli: argparse.Namespace) -> list[tuple[str, Path]]:
     paths = {
         "building": cli.building_file,
         "mnist": cli.mnist_file,
+        "singapore": cli.singapore_file,
+        "nyc": cli.nyc_file,
     }
-    names = ("building", "mnist") if cli.dataset == "both" else (cli.dataset,)
+    if cli.dataset == "both":
+        names = ("building", "mnist")
+    elif cli.dataset == "all":
+        names = ("building", "mnist", "singapore", "nyc")
+    else:
+        names = (cli.dataset,)
     return [(name, paths[name]) for name in names]
 
 
@@ -656,6 +817,21 @@ def main() -> None:
         raise ValueError("--epochs and --patience must be positive")
     if cli.feature_batch_size <= 0 or cli.classifier_batch_size <= 0:
         raise ValueError("Batch sizes must be positive")
+    if cli.task == "classification" and cli.max_samples is not None:
+        raise ValueError("--max-samples is only valid for --task edge-count")
+    if cli.task == "edge-count" and cli.max_samples_per_class is not None:
+        raise ValueError(
+            "--max-samples-per-class is only valid for --task classification"
+        )
+    if cli.task == "classification" and cli.dataset not in {
+        "building",
+        "mnist",
+        "both",
+    }:
+        raise ValueError(
+            "Shape classification labels are available only for the "
+            "Building and MNIST datasets"
+        )
 
     set_seed(cli.seed)
     device = resolve_device(cli.device)
@@ -664,7 +840,8 @@ def main() -> None:
     print(f"Moment parameters: {model_args.moment_params}")
 
     results: dict[str, Any] = {
-        "method": "poly2moment_shape_classification",
+        "method": f"poly2moment_shape_{cli.task.replace('-', '_')}",
+        "task": cli.task,
         "seed": cli.seed,
         "device": str(device),
         "config": str(cli.config.resolve()),
@@ -691,18 +868,33 @@ def main() -> None:
         print(f"\nLoading {dataset_name} from {path}")
         records = load_shape_records(
             path,
+            task=cli.task,
             max_samples_per_class=cli.max_samples_per_class,
+            max_samples=cli.max_samples,
             seed=cli.seed,
         )
-        counts = torch.bincount(
-            records.labels,
-            minlength=len(records.label_names),
-        ).tolist()
+        if cli.task == "classification":
+            counts = torch.bincount(
+                records.labels,
+                minlength=len(records.label_names),
+            ).tolist()
+            task_summary = f"{len(records.label_names)} classes"
+        else:
+            counts = []
+            task_summary = (
+                f"edge range {records.labels.min().item():.0f}-"
+                f"{records.labels.max().item():.0f}"
+            )
         print(
             f"{dataset_name}: {len(records.labels)} polygons, "
-            f"{len(records.label_names)} classes, "
-            f"{records.polygons_with_holes} polygons with holes"
+            f"{task_summary}, {records.polygons_with_holes} polygons with holes"
         )
+        if records.multipolygons_reduced:
+            print(
+                f"{dataset_name}: reduced "
+                f"{records.multipolygons_reduced} MultiPolygons to their "
+                "largest component"
+            )
 
         set_seed(cli.seed + dataset_offset)
         encoder = Poly2Moment(args=model_args, device=device).to(device)
@@ -714,7 +906,7 @@ def main() -> None:
             model_args,
             cli,
         )
-        metrics, split_sizes, epochs_run = train_classifier(
+        metrics, split_sizes, epochs_run = train_predictor(
             encoder,
             features,
             records.labels,
@@ -722,29 +914,53 @@ def main() -> None:
             cli,
             device,
         )
-        results["datasets"][dataset_name] = {
+        dataset_result: dict[str, Any] = {
             "data_file": str(path.resolve()),
             "num_samples": len(records.labels),
-            "num_classes": len(records.label_names),
-            "class_names": records.label_names,
-            "class_counts": dict(zip(records.label_names, counts)),
             "skipped_geometries": records.skipped,
             "polygons_with_holes": records.polygons_with_holes,
+            "multipolygons_reduced": records.multipolygons_reduced,
             "fixed_feature_dim": features.shape[1],
             "split_sizes": split_sizes,
             "epochs_run": epochs_run,
             "metrics": metrics,
         }
-        print(
-            f"{dataset_name} test: "
-            f"accuracy={metrics['test']['accuracy']:.4f}, "
-            f"macro_f1={metrics['test']['macro_f1']:.4f}"
-        )
+        if cli.task == "classification":
+            dataset_result.update(
+                {
+                    "num_classes": len(records.label_names),
+                    "class_names": records.label_names,
+                    "class_counts": dict(zip(records.label_names, counts)),
+                }
+            )
+            print(
+                f"{dataset_name} test: "
+                f"accuracy={metrics['test']['accuracy']:.4f}, "
+                f"macro_f1={metrics['test']['macro_f1']:.4f}"
+            )
+        else:
+            dataset_result["edge_count"] = {
+                "min": float(records.labels.min().item()),
+                "mean": float(records.labels.mean().item()),
+                "median": float(records.labels.median().item()),
+                "max": float(records.labels.max().item()),
+            }
+            print(
+                f"{dataset_name} test: "
+                f"mae={metrics['test']['mae']:.4f}, "
+                f"rmse={metrics['test']['rmse']:.4f}, "
+                f"r2={metrics['test']['r2']:.4f}"
+            )
+        results["datasets"][dataset_name] = dataset_result
 
-    cli.output.parent.mkdir(parents=True, exist_ok=True)
-    with cli.output.open("w", encoding="utf-8") as file:
+    output = cli.output
+    if output is None:
+        task_name = cli.task.replace("-", "_")
+        output = ROOT / "results" / f"poly2moment_shape_{task_name}.json"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("w", encoding="utf-8") as file:
         json.dump(results, file, indent=2, sort_keys=True)
-    print(f"\nSaved results to {cli.output}")
+    print(f"\nSaved results to {output}")
 
 
 if __name__ == "__main__":
